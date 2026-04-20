@@ -3,12 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import StatusBadge from '../components/StatusBadge';
 import InspectionTable from '../components/InspectionTable';
+import { useToast } from '../components/Toast';
 import { getUploadDetail, downloadUpload, downloadSheet } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import type { UploadDetail, SheetResult } from '../types';
 
 export default function ResultDetail() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<UploadDetail | null>(null);
@@ -41,7 +43,7 @@ export default function ResultDetail() {
       downloadBlob(res.data, detail.filename.replace('.xlsx', '_判定结果.xlsx'));
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingAll(false);
     }
@@ -54,7 +56,7 @@ export default function ResultDetail() {
       downloadBlob(res.data, `${result.sheet_name}_判定结果.xlsx`);
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingSheet(false);
     }

@@ -1,9 +1,13 @@
 """Identify which form type an Excel file belongs to."""
 import re
+import logging
 from sqlalchemy.orm import Session
 from models import FormType
+from services.ai_service import identify_form_type_ai, is_ai_available
 
-# Form identification patterns
+logger = logging.getLogger(__name__)
+
+# Built-in form identification patterns
 FORM_PATTERNS = {
     "F-QA1021": {
         "filename_keywords": ["离子消散", "QA1021"],
@@ -32,20 +36,38 @@ FORM_PATTERNS = {
     },
 }
 
+# Regex to extract form codes from filenames
+# Matches patterns like: F-QA1021, F-RD09AA, F-RD09B10, F-RD2140, F-RD0976
+_FORM_CODE_RE = re.compile(r"(F-[A-Z]{2}\d{2,4}[A-Z0-9]{0,3})(?=[_\-\s.\u4e00-\u9fff]|$)", re.IGNORECASE)
+
 
 def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = None, db: Session = None) -> str | None:
     """Identify the form type from filename and sheet names.
 
-    Args:
-        filename: Original filename
-        sheet_names: List of sheet names in the workbook
-        sheet_contents: Optional dict of {sheet_name: first_few_rows_text} for content verification
-        db: Optional database session to check custom form type file_patterns
-
-    Returns:
-        Form code string (e.g., 'F-QA1021') or None
+    Priority:
+      1. Extract exact form code from filename (most reliable)
+      2. Built-in filename keyword matching
+      3. Sheet name pattern matching (for built-in types only)
+      4. Sheet content keyword matching
+      5. Custom form type DB patterns
+      6. AI identification (last resort)
     """
-    # Step 1: Match by built-in filename keywords
+    # Step 1: Extract exact form code from filename using regex
+    code_match = _FORM_CODE_RE.search(filename)
+    if code_match:
+        extracted_code = code_match.group(1).upper()
+        # Check if it's a known built-in code
+        if extracted_code in FORM_PATTERNS:
+            return extracted_code
+        # Check if it exists in DB as a custom type
+        if db:
+            existing = db.query(FormType).filter(FormType.form_code == extracted_code).first()
+            if existing:
+                return extracted_code
+        # New form code found in filename - return it (will be auto-created by upload flow)
+        return extracted_code
+
+    # Step 2: Built-in filename keyword matching (for files without form code in name)
     filename_matches = []
     for form_code, patterns in FORM_PATTERNS.items():
         for keyword in patterns["filename_keywords"]:
@@ -56,19 +78,17 @@ def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = 
     if len(filename_matches) == 1:
         return filename_matches[0]
 
-    # Step 2: If multiple matches or no match, try sheet names
+    # Step 3: Sheet name pattern matching (built-in types only)
     non_summary_sheets = [s for s in sheet_names if s != "汇总"]
-
     for form_code, patterns in FORM_PATTERNS.items():
         pattern = patterns["sheet_name_pattern"]
         for sheet in non_summary_sheets:
             if re.search(pattern, sheet):
-                # For AA vs AB disambiguation, check content
                 if form_code in ("F-RD09AA", "F-RD09AB") and sheet_contents:
                     return _disambiguate_mold(form_code, sheet_contents)
                 return form_code
 
-    # Step 3: Check sheet content if available
+    # Step 4: Sheet content keyword matching
     if sheet_contents:
         all_text = " ".join(str(v) for v in sheet_contents.values())
         for form_code, patterns in FORM_PATTERNS.items():
@@ -76,7 +96,7 @@ def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = 
                 if keyword in all_text:
                     return form_code
 
-    # Step 4: Check custom form types with file_pattern from DB
+    # Step 5: Custom form type DB patterns
     if db:
         custom_types = db.query(FormType).filter(
             FormType.file_pattern.isnot(None),
@@ -89,6 +109,13 @@ def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = 
             except re.error:
                 if ft.file_pattern.lower() in filename.lower():
                     return ft.form_code
+
+    # Step 6: AI identification (last resort)
+    if is_ai_available() and sheet_contents:
+        all_content = "\n".join(f"[{k}] {v}" for k, v in list(sheet_contents.items())[:2])
+        ai_result = identify_form_type_ai(filename, sheet_names, all_content)
+        if ai_result:
+            return ai_result.get("form_code")
 
     return None
 
@@ -118,7 +145,6 @@ def extract_equipment_id_from_sheet(sheet_name: str, form_code: str) -> str:
         'WPRN-0001' -> 'WPRN-0001'
     """
     if form_code == "F-QA1021":
-        # Extract RD-LZ-XX from 'RD-LZ-142026年04月'
         match = re.match(r"(RD-LZ-\d+)", sheet_name)
         return match.group(1) if match else sheet_name
 

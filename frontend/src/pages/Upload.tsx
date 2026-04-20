@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FileUploader from '../components/FileUploader';
 import StepIndicator from '../components/StepIndicator';
+import { useToast } from '../components/Toast';
 import { uploadBatch, downloadUpload, downloadBatch } from '../api/client';
 import { downloadBlob } from '../utils/download';
 
@@ -18,6 +19,7 @@ interface UploadResultItem {
 
 export default function Upload() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const [step, setStep] = useState<0 | 1>(0);
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<UploadResultItem[]>([]);
@@ -38,7 +40,7 @@ export default function Upload() {
       setResults(res.data.results);
       setStep(1);
     } catch (err: any) {
-      alert(err.response?.data?.detail || err.message);
+      toast(err.response?.data?.detail || err.message, 'error');
     } finally {
       setUploading(false);
     }
@@ -51,7 +53,7 @@ export default function Upload() {
       downloadBlob(res.data, filename.replace('.xlsx', '_判定结果.xlsx'));
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingId(null);
     }
@@ -66,7 +68,7 @@ export default function Upload() {
       downloadBlob(res.data, 'inspection_results.zip');
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingAll(false);
     }

@@ -1,7 +1,9 @@
 """Upload API endpoints."""
 import os
+import re
 import uuid
 import json
+import logging
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from openpyxl import load_workbook
@@ -16,7 +18,10 @@ from parsers.rd09aj_parser import RD09AJParser
 from parsers.rd09ak_parser import RD09AKParser
 from parsers.generic_parser import GenericParser
 from services.judgment import judge_sheet_data
+from services.ai_service import identify_form_type_ai, extract_form_name_ai, is_ai_available
 from config import UPLOAD_DIR
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
@@ -153,6 +158,9 @@ def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: st
 
     if form_code:
         form_type = get_form_type_from_db(db, form_code)
+        if not form_type:
+            # Auto-create form type for newly identified form codes
+            form_type = _auto_create_form_type(db, form_code, filename, sheet_contents)
         if form_type:
             upload.form_type_id = form_type.id
 
@@ -222,3 +230,38 @@ def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: st
     wb.close()
     db.flush()
     return results
+
+
+def _auto_create_form_type(db: Session, form_code: str, filename: str, sheet_contents: dict) -> FormType | None:
+    """Auto-create a new FormType when an unknown form code is identified."""
+    try:
+        # Try to get a meaningful name via AI
+        form_name = None
+        if is_ai_available() and sheet_contents:
+            sample = "\n".join(f"[{k}] {v}" for k, v in list(sheet_contents.items())[:2])
+            form_name = extract_form_name_ai(filename, sample)
+
+        if not form_name:
+            # Derive name from filename: remove form code, extension, and UUID prefix
+            name = filename.replace(".xlsx", "").replace(".xls", "")
+            # Remove form code from name
+            name = name.replace(form_code, "").strip(" -_")
+            form_name = name if name else form_code
+
+        # Build a file_pattern from the form code
+        file_pattern = re.escape(form_code)
+
+        form_type = FormType(
+            form_code=form_code,
+            form_name=form_name,
+            file_pattern=file_pattern,
+            is_builtin=False,
+        )
+        db.add(form_type)
+        db.flush()
+        logger.info(f"Auto-created form type: {form_code} - {form_name}")
+        return form_type
+    except Exception as e:
+        logger.error(f"Failed to auto-create form type {form_code}: {e}")
+        db.rollback()
+        return None

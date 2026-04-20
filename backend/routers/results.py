@@ -16,8 +16,21 @@ def list_batches(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """List upload batches grouped by batch_id."""
-    # Subquery: aggregate per batch_id
+    """List upload batches grouped by batch_id.
+
+    Records without batch_id are treated as individual batches.
+    """
+    # First: assign batch_id to records that don't have one
+    orphans = db.query(UploadRecord).filter(
+        (UploadRecord.batch_id == None) | (UploadRecord.batch_id == "")
+    ).all()
+    if orphans:
+        import uuid as _uuid
+        for rec in orphans:
+            rec.batch_id = _uuid.uuid4().hex
+        db.commit()
+
+    # Now query normally - all records have batch_id
     batch_q = (
         db.query(
             UploadRecord.batch_id,
@@ -67,7 +80,7 @@ def list_batches(
                 "id": u.id,
                 "filename": u.original_filename,
                 "form_code": u.form_type.form_code if u.form_type else None,
-                "form_name": u.form_type.form_name if u.form_type else "未识别",
+                "form_name": u.form_type.form_name if u.form_type else None,
                 "total_sheets": u.total_sheets,
                 "ok_count": ok,
                 "ng_count": ng,

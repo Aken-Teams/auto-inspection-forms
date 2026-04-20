@@ -72,6 +72,22 @@ export const importSpecs = (formCode: string, file: File) => {
   });
 };
 
+export const analyzeFile = (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/specs/analyze-file', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+export const createFromFile = (formCode: string, formName: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/specs/create-from-file?form_code=${encodeURIComponent(formCode)}&form_name=${encodeURIComponent(formName)}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
 export const initFormTypes = () => api.post('/specs/init');
 
 // Download

@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { useToast } from '../components/Toast';
 import {
   getFormTypes, getFormSpecs, deleteSpec, renameSpec, createSpec, importSpecs,
-  createFormType, patchFormType, deleteFormType,
+  createFormType, patchFormType, deleteFormType, analyzeFile, createFromFile,
 } from '../api/client';
 import type { FormType } from '../types';
 
@@ -16,8 +17,26 @@ interface SpecListItem {
   extra_info: Record<string, unknown>;
 }
 
+interface SheetInfo {
+  name: string;
+  headers: string[];
+  data_rows: number;
+  sample_keywords: string[];
+}
+
+interface AnalysisResult {
+  filename: string;
+  total_sheets: number;
+  has_summary: boolean;
+  sheets: SheetInfo[];
+  common_keywords: string[];
+  suggested_id_keywords: string[];
+  suggested_file_pattern: string;
+}
+
 export default function SpecManagement() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -36,13 +55,19 @@ export default function SpecManagement() {
 
   // Form type dialogs
   const [showAddFormType, setShowAddFormType] = useState(false);
+  const [addFtStep, setAddFtStep] = useState<1 | 2>(1);
+  const [addFtFile, setAddFtFile] = useState<File | null>(null);
+  const [addFtAnalysis, setAddFtAnalysis] = useState<AnalysisResult | null>(null);
+  const [addFtAnalyzing, setAddFtAnalyzing] = useState(false);
+  const [addFtCreating, setAddFtCreating] = useState(false);
   const [newFtCode, setNewFtCode] = useState('');
   const [newFtName, setNewFtName] = useState('');
-  const [newFtPattern, setNewFtPattern] = useState('');
+  const addFtFileRef = useRef<HTMLInputElement>(null);
   const [editingFormType, setEditingFormType] = useState<FormType | null>(null);
   const [editFtName, setEditFtName] = useState('');
   const [editFtPattern, setEditFtPattern] = useState('');
   const [deleteFormTypeTarget, setDeleteFormTypeTarget] = useState<FormType | null>(null);
+  const [ftSearch, setFtSearch] = useState('');
 
   useEffect(() => {
     loadFormTypes();
@@ -84,7 +109,7 @@ export default function SpecManagement() {
       loadSpecs(activeType);
     } catch (err) {
       console.error(err);
-      alert(t('specs.deleteFailed'));
+      toast(t('specs.deleteFailed'), 'error');
     }
   };
 
@@ -96,7 +121,7 @@ export default function SpecManagement() {
       loadSpecs(activeType);
     } catch (err) {
       console.error(err);
-      alert(t('specs.saveFailed'));
+      toast(t('specs.saveFailed'), 'error');
     }
   };
 
@@ -109,7 +134,7 @@ export default function SpecManagement() {
       setNewName('');
       loadSpecs(activeType);
     } catch (err: any) {
-      alert(err.response?.data?.detail || t('specs.saveFailed'));
+      toast(err.response?.data?.detail || t('specs.saveFailed'), 'error');
     }
   };
 
@@ -119,31 +144,59 @@ export default function SpecManagement() {
     try {
       await importSpecs(activeType, file);
       loadSpecs(activeType);
-      alert(t('specs.importSuccess'));
+      toast(t('specs.importSuccess'), 'success');
     } catch (err) {
       console.error(err);
-      alert(t('specs.importFailed'));
+      toast(t('specs.importFailed'), 'error');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // Form type CRUD
-  const handleCreateFormType = async () => {
-    if (!newFtCode.trim() || !newFtName.trim()) return;
+  const resetAddFormType = () => {
+    setShowAddFormType(false);
+    setAddFtStep(1);
+    setAddFtFile(null);
+    setAddFtAnalysis(null);
+    setAddFtAnalyzing(false);
+    setAddFtCreating(false);
+    setNewFtCode('');
+    setNewFtName('');
+  };
+
+  const handleAnalyzeFile = async (file: File) => {
+    setAddFtFile(file);
+    setAddFtAnalyzing(true);
     try {
-      await createFormType({
-        form_code: newFtCode.trim(),
-        form_name: newFtName.trim(),
-        file_pattern: newFtPattern.trim() || undefined,
-      });
-      setShowAddFormType(false);
-      setNewFtCode('');
-      setNewFtName('');
-      setNewFtPattern('');
-      await loadFormTypes();
-      setActiveType(newFtCode.trim());
+      const res = await analyzeFile(file);
+      setAddFtAnalysis(res.data);
+      // Auto-suggest form code from filename
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      const suggestedCode = baseName.replace(/\d{4}[年\-/]\d{1,2}[月\-/]?\d{0,2}[日]?/g, '').trim().substring(0, 20) || baseName.substring(0, 20);
+      setNewFtCode(suggestedCode);
+      setNewFtName(baseName);
+      setAddFtStep(2);
     } catch (err: any) {
-      alert(err.response?.data?.detail || t('specs.saveFailed'));
+      toast(err.response?.data?.detail || t('specs.analyzeFailed'), 'error');
+      setAddFtFile(null);
+    } finally {
+      setAddFtAnalyzing(false);
+    }
+  };
+
+  const handleCreateFromFile = async () => {
+    if (!newFtCode.trim() || !newFtName.trim() || !addFtFile) return;
+    setAddFtCreating(true);
+    try {
+      await createFromFile(newFtCode.trim(), newFtName.trim(), addFtFile);
+      const savedCode = newFtCode.trim();
+      resetAddFormType();
+      await loadFormTypes();
+      setActiveType(savedCode);
+    } catch (err: any) {
+      toast(err.response?.data?.detail || t('specs.saveFailed'), 'error');
+    } finally {
+      setAddFtCreating(false);
     }
   };
 
@@ -157,7 +210,7 @@ export default function SpecManagement() {
       setEditingFormType(null);
       loadFormTypes();
     } catch (err: any) {
-      alert(err.response?.data?.detail || t('specs.saveFailed'));
+      toast(err.response?.data?.detail || t('specs.saveFailed'), 'error');
     }
   };
 
@@ -172,9 +225,16 @@ export default function SpecManagement() {
       }
       loadFormTypes();
     } catch (err: any) {
-      alert(err.response?.data?.detail || t('specs.deleteFailed'));
+      toast(err.response?.data?.detail || t('specs.deleteFailed'), 'error');
     }
   };
+
+  const filteredFormTypes = ftSearch.trim()
+    ? formTypes.filter(ft =>
+        ft.form_code.toLowerCase().includes(ftSearch.toLowerCase()) ||
+        ft.form_name.toLowerCase().includes(ftSearch.toLowerCase())
+      )
+    : formTypes;
 
   const activeFormType = formTypes.find(ft => ft.form_code === activeType);
 
@@ -188,8 +248,8 @@ export default function SpecManagement() {
       {/* Form Types - two-column layout */}
       <div className="grid grid-cols-[280px_1fr] gap-6">
         {/* Left: Form Type List */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-charcoal tracking-wide">{t('specs.formTypeList')}</h3>
             <button
               onClick={() => setShowAddFormType(true)}
@@ -203,31 +263,63 @@ export default function SpecManagement() {
             </button>
           </div>
 
-          <div className="space-y-1.5">
-            {formTypes.map(ft => (
-              <div
-                key={ft.form_code}
-                onClick={() => setActiveType(ft.form_code)}
-                className={`group px-3 py-2.5 rounded-lg cursor-pointer transition-all
-                  ${activeType === ft.form_code
-                    ? 'bg-charcoal text-cream shadow-md'
-                    : 'bg-white border border-sand/40 hover:bg-paper hover:shadow-sm'
-                  }`}
+          {/* Search */}
+          <div className="relative mb-3">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-warm-gray pointer-events-none"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={ftSearch}
+              onChange={e => setFtSearch(e.target.value)}
+              placeholder={t('specs.searchFormType')}
+              className="w-full border border-sand/60 rounded pl-8 pr-3 py-1.5 text-xs
+                         focus:outline-none focus:border-terracotta
+                         placeholder:text-warm-gray/50 transition-colors"
+            />
+            {ftSearch && (
+              <button
+                onClick={() => setFtSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-warm-gray
+                           hover:text-charcoal transition-colors"
               >
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate">{ft.form_code}</div>
-                    <div className={`text-xs truncate ${activeType === ft.form_code ? 'text-cream/70' : 'text-warm-gray'}`}>
-                      {ft.form_name}
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-1.5 overflow-y-auto flex-1 pr-1">
+            {filteredFormTypes.map(ft => {
+              const isActive = activeType === ft.form_code;
+              return (
+                <div
+                  key={ft.form_code}
+                  onClick={() => setActiveType(ft.form_code)}
+                  className={`group/ft px-3 py-2.5 rounded-lg cursor-pointer transition-all relative
+                    ${isActive
+                      ? 'bg-charcoal text-cream shadow-md'
+                      : 'bg-white border border-sand/40 hover:bg-paper hover:shadow-sm'
+                    }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold truncate">{ft.form_code}</div>
+                      <div className={`text-xs truncate ${isActive ? 'text-cream/70' : 'text-warm-gray'}`}>
+                        {ft.form_name}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded
-                      ${activeType === ft.form_code ? 'bg-cream/20 text-cream' : 'bg-sand/30 text-charcoal'}`}>
-                      {ft.spec_count}
-                    </span>
-                    {!ft.is_builtin && activeType === ft.form_code && (
-                      <div className="flex gap-0.5">
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      {/* Spec count - hide on hover to make room for actions */}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded group-hover/ft:hidden
+                        ${isActive ? 'bg-cream/20 text-cream' : 'bg-sand/30 text-charcoal'}`}>
+                        {ft.spec_count}
+                      </span>
+                      {/* Action buttons - show on hover */}
+                      <div className="hidden group-hover/ft:flex gap-0.5">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -235,42 +327,39 @@ export default function SpecManagement() {
                             setEditFtName(ft.form_name);
                             setEditFtPattern(ft.file_pattern || '');
                           }}
-                          className="p-1 rounded hover:bg-cream/20 transition-colors"
-                          title={t('specs.editMapping')}
+                          className={`p-1.5 rounded transition-colors ${isActive
+                            ? 'hover:bg-cream/20 text-cream'
+                            : 'hover:bg-terracotta/10 text-warm-gray hover:text-terracotta'}`}
+                          title={t('specs.rename')}
                         >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                               d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setDeleteFormTypeTarget(ft); }}
-                          className="p-1 rounded hover:bg-rust/20 transition-colors"
+                          className={`p-1.5 rounded transition-colors ${isActive
+                            ? 'hover:bg-rust/30 text-cream'
+                            : 'hover:bg-rust/10 text-warm-gray hover:text-rust'}`}
                           title={t('specs.delete')}
                         >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
                         </button>
                       </div>
-                    )}
+                    </div>
                   </div>
+                  {ft.is_builtin && (
+                    <div className={`text-[10px] mt-1 ${isActive ? 'text-cream/50' : 'text-warm-gray/60'}`}>
+                      {t('specs.builtIn')}
+                    </div>
+                  )}
                 </div>
-                {ft.file_pattern && (
-                  <div className={`text-[10px] mt-1 truncate font-mono
-                    ${activeType === ft.form_code ? 'text-cream/50' : 'text-warm-gray/60'}`}
-                    title={ft.file_pattern}
-                  >
-                    {t('specs.filePattern')}: {ft.file_pattern}
-                  </div>
-                )}
-                {ft.is_builtin && (
-                  <div className={`text-[10px] mt-1 ${activeType === ft.form_code ? 'text-cream/50' : 'text-warm-gray/60'}`}>
-                    {t('specs.builtIn')}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -424,7 +513,12 @@ export default function SpecManagement() {
       <ConfirmDialog
         open={!!deleteFormTypeTarget}
         title={t('specs.confirmDeleteFormTypeTitle')}
-        message={t('specs.confirmDeleteFormType', { name: deleteFormTypeTarget?.form_code || '' })}
+        message={
+          (deleteFormTypeTarget?.is_builtin
+            ? t('specs.builtInWarning') + '\n\n'
+            : '') +
+          t('specs.confirmDeleteFormType', { name: deleteFormTypeTarget?.form_code || '' })
+        }
         onConfirm={handleDeleteFormType}
         onCancel={() => setDeleteFormTypeTarget(null)}
         danger
@@ -504,59 +598,190 @@ export default function SpecManagement() {
         </div>
       )}
 
-      {/* Add Form Type Dialog */}
+      {/* Add Form Type Dialog - Upload-driven wizard */}
       {showAddFormType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-ink/40" onClick={() => setShowAddFormType(false)} />
-          <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+          <div className="fixed inset-0 bg-ink/40" onClick={resetAddFormType} />
+          <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-serif text-charcoal mb-1">{t('specs.addFormType')}</h3>
-            <p className="text-xs text-warm-gray mb-4">{t('specs.addFormTypeDesc')}</p>
-            <div className="space-y-3 mb-4">
-              <div>
-                <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formCode')}</label>
-                <input
-                  type="text"
-                  value={newFtCode}
-                  onChange={e => setNewFtCode(e.target.value)}
-                  placeholder={t('specs.formCodePlaceholder')}
-                  className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
-                  autoFocus
-                />
+            <p className="text-xs text-warm-gray mb-4">{t('specs.addFormTypeUploadDesc')}</p>
+
+            {/* Step indicator */}
+            <div className="flex items-center gap-3 mb-6">
+              <div className={`flex items-center gap-2 text-xs ${addFtStep >= 1 ? 'text-forest' : 'text-warm-gray'}`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold
+                  ${addFtStep >= 1 ? 'bg-forest text-cream' : 'bg-sand/40 text-warm-gray'}`}>1</span>
+                {t('specs.uploadSample')}
               </div>
-              <div>
-                <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formNameLabel')}</label>
-                <input
-                  type="text"
-                  value={newFtName}
-                  onChange={e => setNewFtName(e.target.value)}
-                  placeholder={t('specs.formNamePlaceholder')}
-                  className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.filePatternLabel')}</label>
-                <input
-                  type="text"
-                  value={newFtPattern}
-                  onChange={e => setNewFtPattern(e.target.value)}
-                  placeholder={t('specs.filePatternPlaceholder')}
-                  className="w-full border border-sand rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-terracotta"
-                  onKeyDown={e => e.key === 'Enter' && handleCreateFormType()}
-                />
-                <p className="text-[10px] text-warm-gray mt-1">{t('specs.filePatternHint')}</p>
+              <div className="flex-1 h-px bg-sand/40" />
+              <div className={`flex items-center gap-2 text-xs ${addFtStep >= 2 ? 'text-forest' : 'text-warm-gray'}`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold
+                  ${addFtStep >= 2 ? 'bg-forest text-cream' : 'bg-sand/40 text-warm-gray'}`}>2</span>
+                {t('specs.confirmCreate')}
               </div>
             </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowAddFormType(false)}
-                className="px-4 py-2 text-sm text-warm-gray border border-sand/50 rounded
-                           hover:bg-paper hover:shadow-sm active:scale-95 transition-all">
-                {t('specs.cancel')}
-              </button>
-              <button onClick={handleCreateFormType}
-                className="px-4 py-2 text-sm bg-forest text-cream rounded
-                           hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all">
-                {t('specs.confirm')}
-              </button>
+
+            {/* Step 1: Upload file */}
+            {addFtStep === 1 && (
+              <div>
+                {addFtAnalyzing ? (
+                  <div className="text-center py-12">
+                    <div className="inline-block w-8 h-8 border-2 border-forest/30 border-t-forest rounded-full animate-spin mb-3" />
+                    <p className="text-sm text-warm-gray">{t('specs.analyzing')}</p>
+                  </div>
+                ) : (
+                  <div
+                    className="border-2 border-dashed border-sand rounded-lg p-10 text-center
+                               hover:border-terracotta/40 hover:bg-terracotta/5 transition-all cursor-pointer"
+                    onClick={() => addFtFileRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && /\.xlsx?$/i.test(file.name)) handleAnalyzeFile(file);
+                    }}
+                  >
+                    <svg className="mx-auto w-10 h-10 text-sand mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-sm text-charcoal mb-1">{t('specs.uploadSampleFile')}</p>
+                    <p className="text-xs text-warm-gray">{t('specs.uploadSampleHint')}</p>
+                    <input
+                      ref={addFtFileRef}
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) handleAnalyzeFile(file);
+                        if (addFtFileRef.current) addFtFileRef.current.value = '';
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Step 2: Review analysis + confirm */}
+            {addFtStep === 2 && addFtAnalysis && (
+              <div className="space-y-4">
+                {/* Analysis summary */}
+                <div className="bg-paper rounded-lg p-4 border border-sand/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-4 h-4 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-sm font-medium text-charcoal">{t('specs.analysisResult')}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <span className="text-warm-gray">{t('specs.detectedSheets')}</span>
+                      <p className="text-charcoal font-medium">{addFtAnalysis.total_sheets}</p>
+                    </div>
+                    <div>
+                      <span className="text-warm-gray">{t('specs.hasSummary')}</span>
+                      <p className="text-charcoal font-medium">{addFtAnalysis.has_summary ? t('specs.yes') : t('specs.no')}</p>
+                    </div>
+                    <div>
+                      <span className="text-warm-gray">{t('specs.sourceFile')}</span>
+                      <p className="text-charcoal font-medium truncate" title={addFtAnalysis.filename}>{addFtAnalysis.filename}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detected sheets preview */}
+                {addFtAnalysis.sheets.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-charcoal mb-2">{t('specs.detectedEquipment')}</h4>
+                    <div className="max-h-40 overflow-y-auto border border-sand/30 rounded-lg">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-paper border-b border-sand/30 sticky top-0">
+                            <th className="px-3 py-1.5 text-left font-medium text-charcoal">{t('specs.sheetName')}</th>
+                            <th className="px-3 py-1.5 text-center font-medium text-charcoal">{t('specs.dataRows')}</th>
+                            <th className="px-3 py-1.5 text-left font-medium text-charcoal">{t('specs.headers')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {addFtAnalysis.sheets.map((sheet, i) => (
+                            <tr key={i} className="border-b border-sand/20">
+                              <td className="px-3 py-1.5 text-charcoal font-medium">{sheet.name}</td>
+                              <td className="px-3 py-1.5 text-center text-warm-gray">{sheet.data_rows}</td>
+                              <td className="px-3 py-1.5 text-warm-gray truncate max-w-[200px]"
+                                  title={sheet.headers.join(', ')}>
+                                {sheet.headers.slice(0, 5).join(', ')}
+                                {sheet.headers.length > 5 && '...'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Form code + name inputs */}
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formCode')}</label>
+                    <input
+                      type="text"
+                      value={newFtCode}
+                      onChange={e => setNewFtCode(e.target.value)}
+                      placeholder={t('specs.formCodePlaceholder')}
+                      className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formNameLabel')}</label>
+                    <input
+                      type="text"
+                      value={newFtName}
+                      onChange={e => setNewFtName(e.target.value)}
+                      placeholder={t('specs.formNamePlaceholder')}
+                      className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-warm-gray">{t('specs.createFromFileHint')}</p>
+              </div>
+            )}
+
+            {/* Footer buttons */}
+            <div className="flex justify-between mt-6">
+              <div>
+                {addFtStep === 2 && (
+                  <button
+                    onClick={() => { setAddFtStep(1); setAddFtFile(null); setAddFtAnalysis(null); }}
+                    className="px-4 py-2 text-sm text-warm-gray border border-sand/50 rounded
+                               hover:bg-paper hover:shadow-sm active:scale-95 transition-all"
+                  >
+                    {t('specs.reupload')}
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={resetAddFormType}
+                  className="px-4 py-2 text-sm text-warm-gray border border-sand/50 rounded
+                             hover:bg-paper hover:shadow-sm active:scale-95 transition-all">
+                  {t('specs.cancel')}
+                </button>
+                {addFtStep === 2 && (
+                  <button
+                    onClick={handleCreateFromFile}
+                    disabled={!newFtCode.trim() || !newFtName.trim() || addFtCreating}
+                    className="px-4 py-2 text-sm bg-forest text-cream rounded
+                               hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {addFtCreating && <div className="w-3.5 h-3.5 border-2 border-cream/30 border-t-cream rounded-full animate-spin" />}
+                    {t('specs.createFormType')}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useToast } from '../components/Toast';
 import { getUploadBatches, downloadUpload, downloadBatch } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import type { UploadBatch, UploadListItem } from '../types';
 
 export default function Results() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -42,7 +44,7 @@ export default function Results() {
       downloadBlob(res.data, filename.replace('.xlsx', '_判定结果.xlsx'));
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingId(null);
     }
@@ -57,7 +59,7 @@ export default function Results() {
       downloadBlob(res.data, `batch_${batch.batch_id.slice(0, 8)}.zip`);
     } catch (err) {
       console.error(err);
-      alert(t('upload.downloadFailed'));
+      toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingBatchId(null);
     }
@@ -114,7 +116,9 @@ export default function Results() {
                 {/* Batch Header */}
                 <div
                   onClick={() => toggleExpand(batch.batch_id)}
-                  className="flex items-center px-5 py-4 cursor-pointer hover:bg-paper/50 transition-all group"
+                  className="flex items-center px-5 py-4 cursor-pointer
+                             hover:bg-paper hover:shadow-sm
+                             active:scale-[0.995] transition-all group"
                 >
                   {/* Expand arrow */}
                   <svg
@@ -234,7 +238,7 @@ function FileRow({ file, isLast, downloadingId, onDownload, onClick, t }: {
     <div
       onClick={onClick}
       className={`flex items-center px-5 py-3 pl-12 cursor-pointer
-        hover:bg-paper/80 transition-all group
+        hover:bg-sand/15 transition-all group
         ${!isLast ? 'border-b border-sand/20' : ''}`}
     >
       {/* File icon */}

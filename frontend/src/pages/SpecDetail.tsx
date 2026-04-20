@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useToast } from '../components/Toast';
 import { getFormSpecs, updateSpec } from '../api/client';
 import type { FormSpec, SpecItemData } from '../types';
 
@@ -63,6 +64,7 @@ function emptyEditItem(): EditItem {
 
 export default function SpecDetail() {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const { formCode, specId } = useParams<{ formCode: string; specId: string }>();
   const navigate = useNavigate();
 
@@ -136,7 +138,7 @@ export default function SpecDetail() {
       loadSpec();
     } catch (err) {
       console.error(err);
-      alert(t('specs.saveFailed'));
+      toast(t('specs.saveFailed'), 'error');
     } finally {
       setSaving(false);
     }
