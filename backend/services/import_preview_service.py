@@ -217,11 +217,155 @@ def _preview_builtin(db: Session, ws, form_type) -> list[dict] | None:
                     })
             row += 1
 
-    else:
-        # For RD09AB, RD09AJ, RD09AK - fall back to AI preview since
-        # replicating their complex parsing logic in read-only mode is excessive.
-        # The actual import will use the built-in parser.
-        return _preview_ai(ws, form_type)[0]
+    elif form_code == "F-RD09AB":
+        row = 1
+        while row <= (ws.max_row or 0):
+            val_a = _cell_val(ws, row, 1)
+            val_b = _cell_val(ws, row, 2)
+            if val_a and "机台" in str(val_a) and val_b:
+                machine_id = str(val_b).strip()
+                data_start = row + 4
+                r = data_start
+                while r <= (ws.max_row or 0):
+                    reason = _cell_val(ws, r, 2)
+                    if not reason:
+                        break
+                    method = _cell_val(ws, r, 3)
+                    wash_key = f"{machine_id}_{reason}_{method}"
+                    items = []
+                    order = 0
+                    for col, name in [(7, "合模压力(ton)"), (8, "注塑压强(kgf/cm²)")]:
+                        spec_str = _cell_val(ws, r, col)
+                        if spec_str:
+                            items.append({"item_name": name, "spec_value": str(spec_str),
+                                          "parsed_spec": parse_spec_string(str(spec_str)),
+                                          "group_name": "参数", "sub_group": None, "display_order": order})
+                            order += 1
+                    for offset, pos in enumerate(["上模", "下模"]):
+                        cur_r = r + offset
+                        set_val = _cell_val(ws, cur_r, 10)
+                        if set_val:
+                            items.append({"item_name": f"模温设定值({pos})", "spec_value": str(set_val),
+                                          "parsed_spec": parse_spec_string(str(set_val)),
+                                          "group_name": "模温", "sub_group": pos, "display_order": order})
+                            order += 1
+                        for i, col in enumerate([11, 12, 13, 14]):
+                            disp_val = _cell_val(ws, cur_r, col)
+                            if disp_val:
+                                items.append({"item_name": f"模温显示值{i+1}({pos})", "spec_value": str(disp_val),
+                                              "parsed_spec": parse_spec_string(str(disp_val)),
+                                              "group_name": "模温", "sub_group": pos, "display_order": order})
+                                order += 1
+                    for i, col in enumerate([15, 16, 17, 18, 19]):
+                        app_val = _cell_val(ws, r, col)
+                        if app_val:
+                            items.append({"item_name": f"外观确认{i+1}", "spec_value": str(app_val),
+                                          "parsed_spec": parse_spec_string(str(app_val)),
+                                          "group_name": "外观", "sub_group": None, "display_order": order})
+                            order += 1
+                    for col, name in [(20, "模具状态"), (21, "定位针状态")]:
+                        status_val = _cell_val(ws, r, col)
+                        if status_val:
+                            items.append({"item_name": name, "spec_value": str(status_val),
+                                          "parsed_spec": parse_spec_string(str(status_val)),
+                                          "group_name": "状态", "sub_group": None, "display_order": order})
+                            order += 1
+                    results.append({"equipment_id": wash_key, "equipment_name": f"{machine_id} {reason}-{method}", "items": items})
+                    r += 2
+                row = r
+            else:
+                row += 1
+
+    elif form_code == "F-RD09AJ":
+        row = 1
+        while row <= (ws.max_row or 0):
+            val = _cell_val(ws, row, 1)
+            if val and "焊接炉编号" in str(val):
+                furnace_id = str(_cell_val(ws, row, 2) or "").strip()
+                if not furnace_id:
+                    row += 1
+                    continue
+                spec_row = row + 4
+                items = []
+                order = 0
+                for i, col in enumerate(range(2, 10)):
+                    spec_str = _cell_val(ws, spec_row, col)
+                    if spec_str:
+                        items.append({"item_name": f"温区{i+1}设定SV(℃)", "spec_value": str(spec_str),
+                                      "parsed_spec": parse_spec_string(str(spec_str)),
+                                      "group_name": "温度设定", "sub_group": f"温区{i+1}", "display_order": order})
+                        order += 1
+                for i, col in enumerate(range(10, 18)):
+                    spec_str = _cell_val(ws, spec_row, col)
+                    if spec_str:
+                        items.append({"item_name": f"温区{i+1}实际PV(℃)", "spec_value": str(spec_str),
+                                      "parsed_spec": parse_spec_string(str(spec_str)),
+                                      "group_name": "实际温度", "sub_group": f"温区{i+1}", "display_order": order})
+                        order += 1
+                gas_names_row = row + 2
+                for col in range(18, 24):
+                    gas_name = _cell_val(ws, gas_names_row, col)
+                    spec_str = _cell_val(ws, spec_row, col)
+                    if spec_str:
+                        label = str(gas_name) if gas_name else f"氮气{col-17}"
+                        items.append({"item_name": label, "spec_value": str(spec_str),
+                                      "parsed_spec": parse_spec_string(str(spec_str)),
+                                      "group_name": "氮气", "sub_group": None, "display_order": order})
+                        order += 1
+                cooling_spec = _cell_val(ws, spec_row, 24)
+                if cooling_spec:
+                    items.append({"item_name": "冷却水流量LPM", "spec_value": str(cooling_spec),
+                                  "parsed_spec": parse_spec_string(str(cooling_spec)),
+                                  "group_name": "冷却水", "sub_group": None, "display_order": order})
+                    order += 1
+                results.append({"equipment_id": furnace_id, "equipment_name": f"焊接炉{furnace_id}", "items": items})
+                row = spec_row + 1
+            else:
+                row += 1
+
+    elif form_code == "F-RD09AK":
+        row = 1
+        while row <= (ws.max_row or 0):
+            val = _cell_val(ws, row, 1)
+            if val and "Package" in str(val):
+                package_match = re.search(r"Package[：:]\s*(\S+)", str(val))
+                package = package_match.group(1) if package_match else ""
+                machine_row = row + 1
+                machine_val = _cell_val(ws, machine_row, 1)
+                machine_match = re.search(r"(WTFB-\d+)", str(machine_val) if machine_val else "")
+                machine_id = machine_match.group(1) if machine_match else ""
+                if not machine_id:
+                    row += 1
+                    continue
+                spec_key = f"{machine_id}_{package}"
+                num_row = row + 3
+                meas_count = 0
+                for col in range(3, 30):
+                    nv = _cell_val(ws, num_row, col)
+                    if nv and str(nv).strip().isdigit():
+                        meas_count = int(str(nv).strip())
+                    else:
+                        break
+                items = []
+                order = 0
+                data_start = row + 4
+                for part_row in range(data_start, data_start + 5):
+                    if part_row > (ws.max_row or 0):
+                        break
+                    part_name = _cell_val(ws, part_row, 2)
+                    if not part_name:
+                        continue
+                    spec_str = _cell_val(ws, part_row, 3)
+                    if spec_str:
+                        for meas_num in range(1, meas_count + 1):
+                            items.append({"item_name": f"meas_{meas_num}", "spec_value": str(spec_str),
+                                          "parsed_spec": parse_spec_string(str(spec_str)),
+                                          "group_name": "测量", "sub_group": str(part_name), "display_order": order})
+                            order += 1
+                results.append({"equipment_id": spec_key, "equipment_name": f"{machine_id} {package}", "items": items})
+                row = data_start + 5
+            else:
+                row += 1
 
     return results
 
