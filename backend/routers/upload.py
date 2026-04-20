@@ -234,6 +234,11 @@ def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: st
 
 def _auto_create_form_type(db: Session, form_code: str, filename: str, sheet_contents: dict) -> FormType | None:
     """Auto-create a new FormType when an unknown form code is identified."""
+    # Check if already exists (race condition guard)
+    existing = db.query(FormType).filter(FormType.form_code == form_code).first()
+    if existing:
+        return existing
+
     try:
         # Try to get a meaningful name via AI
         form_name = None
@@ -264,4 +269,6 @@ def _auto_create_form_type(db: Session, form_code: str, filename: str, sheet_con
     except Exception as e:
         logger.error(f"Failed to auto-create form type {form_code}: {e}")
         db.rollback()
-        return None
+        # Try to find existing after IntegrityError (concurrent creation)
+        existing = db.query(FormType).filter(FormType.form_code == form_code).first()
+        return existing

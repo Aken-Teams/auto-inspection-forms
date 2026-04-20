@@ -31,6 +31,9 @@ export const getUploads = (page = 1, pageSize = 20, formCode?: string) =>
 export const getUploadBatches = (page = 1, pageSize = 20) =>
   api.get('/results/batches', { params: { page, page_size: pageSize } });
 
+export const deleteBatch = (batchId: string) =>
+  api.delete(`/results/batches/${batchId}`);
+
 export const getUploadDetail = (id: number) =>
   api.get(`/results/${id}`);
 

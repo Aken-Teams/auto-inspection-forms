@@ -32,6 +32,8 @@ interface AnalysisResult {
   common_keywords: string[];
   suggested_id_keywords: string[];
   suggested_file_pattern: string;
+  extracted_form_code: string | null;
+  matched_form_code: string | null;
 }
 
 export default function SpecManagement() {
@@ -68,6 +70,7 @@ export default function SpecManagement() {
   const [editFtPattern, setEditFtPattern] = useState('');
   const [deleteFormTypeTarget, setDeleteFormTypeTarget] = useState<FormType | null>(null);
   const [ftSearch, setFtSearch] = useState('');
+  const [showSpecGuide, setShowSpecGuide] = useState(false);
 
   useEffect(() => {
     loadFormTypes();
@@ -169,11 +172,20 @@ export default function SpecManagement() {
     setAddFtAnalyzing(true);
     try {
       const res = await analyzeFile(file);
-      setAddFtAnalysis(res.data);
-      // Auto-suggest form code from filename
+      const analysis = res.data as AnalysisResult;
+      setAddFtAnalysis(analysis);
+
+      // Use extracted form code from backend (regex-based) as suggested code
+      if (analysis.extracted_form_code) {
+        setNewFtCode(analysis.extracted_form_code);
+      } else {
+        // Fallback: derive from filename
+        const baseName = file.name.replace(/\.[^.]+$/, '');
+        setNewFtCode(baseName.substring(0, 20));
+      }
+
+      // Suggest form name from filename (remove code and extension)
       const baseName = file.name.replace(/\.[^.]+$/, '');
-      const suggestedCode = baseName.replace(/\d{4}[年\-/]\d{1,2}[月\-/]?\d{0,2}[日]?/g, '').trim().substring(0, 20) || baseName.substring(0, 20);
-      setNewFtCode(suggestedCode);
       setNewFtName(baseName);
       setAddFtStep(2);
     } catch (err: any) {
@@ -241,7 +253,20 @@ export default function SpecManagement() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-serif text-charcoal mb-1">{t('specs.title')}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-2xl font-serif text-charcoal mb-1">{t('specs.title')}</h2>
+          <button
+            onClick={() => setShowSpecGuide(true)}
+            className="p-1 text-warm-gray hover:text-terracotta hover:bg-terracotta/10
+                       rounded-full transition-all active:scale-90"
+            title={t('specs.guideTitle')}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+        </div>
         <p className="text-warm-gray text-sm">{t('specs.description')}</p>
       </div>
 
@@ -667,6 +692,40 @@ export default function SpecManagement() {
             {/* Step 2: Review analysis + confirm */}
             {addFtStep === 2 && addFtAnalysis && (
               <div className="space-y-4">
+                {/* Warning: file matches existing form type */}
+                {addFtAnalysis.matched_form_code && (
+                  <div className="bg-rust/10 rounded-lg p-4 border border-rust/30">
+                    <div className="flex items-start gap-2">
+                      <svg className="w-4 h-4 text-rust shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-medium text-rust">{t('specs.fileMatchesExisting')}</p>
+                        <p className="text-xs text-rust/80 mt-0.5">
+                          {t('specs.fileMatchesExistingDesc', { code: addFtAnalysis.matched_form_code })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Warning: no summary sheet */}
+                {!addFtAnalysis.has_summary && (
+                  <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                    <div className="flex items-start gap-2">
+                      <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-medium text-amber-700">{t('specs.noSummarySheet')}</p>
+                        <p className="text-xs text-amber-600 mt-0.5">{t('specs.noSummarySheetDesc')}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Analysis summary */}
                 <div className="bg-paper rounded-lg p-4 border border-sand/30">
                   <div className="flex items-center gap-2 mb-3">
@@ -682,7 +741,9 @@ export default function SpecManagement() {
                     </div>
                     <div>
                       <span className="text-warm-gray">{t('specs.hasSummary')}</span>
-                      <p className="text-charcoal font-medium">{addFtAnalysis.has_summary ? t('specs.yes') : t('specs.no')}</p>
+                      <p className={`font-medium ${addFtAnalysis.has_summary ? 'text-forest' : 'text-rust'}`}>
+                        {addFtAnalysis.has_summary ? t('specs.yes') : t('specs.no')}
+                      </p>
                     </div>
                     <div>
                       <span className="text-warm-gray">{t('specs.sourceFile')}</span>
@@ -731,8 +792,14 @@ export default function SpecManagement() {
                       value={newFtCode}
                       onChange={e => setNewFtCode(e.target.value)}
                       placeholder={t('specs.formCodePlaceholder')}
-                      className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
+                      className={`w-full border rounded px-3 py-2 text-sm focus:outline-none
+                        ${formTypes.some(ft => ft.form_code === newFtCode.trim())
+                          ? 'border-rust focus:border-rust'
+                          : 'border-sand focus:border-terracotta'}`}
                     />
+                    {formTypes.some(ft => ft.form_code === newFtCode.trim()) && (
+                      <p className="text-[11px] text-rust mt-1">{t('specs.formCodeDuplicate')}</p>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formNameLabel')}</label>
@@ -746,7 +813,11 @@ export default function SpecManagement() {
                   </div>
                 </div>
 
-                <p className="text-[10px] text-warm-gray">{t('specs.createFromFileHint')}</p>
+                <p className="text-[10px] text-warm-gray">
+                  {addFtAnalysis.has_summary
+                    ? t('specs.createFromFileHint')
+                    : t('specs.createNoSummaryHint')}
+                </p>
               </div>
             )}
 
@@ -772,7 +843,7 @@ export default function SpecManagement() {
                 {addFtStep === 2 && (
                   <button
                     onClick={handleCreateFromFile}
-                    disabled={!newFtCode.trim() || !newFtName.trim() || addFtCreating}
+                    disabled={!newFtCode.trim() || !newFtName.trim() || addFtCreating || formTypes.some(ft => ft.form_code === newFtCode.trim())}
                     className="px-4 py-2 text-sm bg-forest text-cream rounded
                                hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all
                                disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -782,6 +853,122 @@ export default function SpecManagement() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spec Guide Modal */}
+      {showSpecGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-ink/40" onClick={() => setShowSpecGuide(false)} />
+          <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-serif text-charcoal">{t('specs.guideTitle')}</h3>
+              <button
+                onClick={() => setShowSpecGuide(false)}
+                className="p-1.5 text-warm-gray hover:text-charcoal hover:bg-sand/30
+                           rounded-full transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Flow diagram */}
+            <div className="bg-paper rounded-lg p-5 border border-sand/30 mb-4">
+              <div className="flex flex-col items-center gap-3">
+                {/* Excel file */}
+                <div className="flex items-center gap-4 w-full">
+                  <div className="flex-1 border-2 border-forest/30 rounded-lg p-3 bg-white">
+                    <div className="text-xs font-medium text-forest mb-2 text-center">{t('specs.guideExcelFile')}</div>
+                    <div className="flex gap-2 justify-center">
+                      <div className="border border-sand rounded px-2 py-1 text-[10px] text-charcoal bg-cream/50">WCBA-0001</div>
+                      <div className="border border-sand rounded px-2 py-1 text-[10px] text-charcoal bg-cream/50">WCBA-0002</div>
+                      <div className="border border-sand rounded px-2 py-1 text-[10px] text-charcoal bg-cream/50">...</div>
+                      <div className="border-2 border-terracotta/60 rounded px-2 py-1 text-[10px] text-terracotta font-bold bg-terracotta/5">{t('specs.guideSummaryTab')}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Arrow down with labels */}
+                <div className="flex items-start gap-8 w-full">
+                  {/* Left: with summary */}
+                  <div className="flex-1 flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-1 text-[10px] text-forest font-medium">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      {t('specs.guideHasSummary')}
+                    </div>
+                    <svg className="w-5 h-8 text-forest" fill="none" viewBox="0 0 20 32" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 2v24m0 0l-6-6m6 6l6-6" />
+                    </svg>
+                    <div className="border-2 border-forest/40 rounded-lg p-3 bg-forest/5 w-full text-center">
+                      <div className="text-xs font-medium text-forest mb-1">{t('specs.guideAutoImport')}</div>
+                      <div className="text-[10px] text-forest/70">{t('specs.guideAutoImportDesc')}</div>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="flex flex-col items-center pt-6">
+                    <div className="w-px h-20 bg-sand/60" />
+                  </div>
+
+                  {/* Right: without summary */}
+                  <div className="flex-1 flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-1 text-[10px] text-rust font-medium">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      {t('specs.guideNoSummary')}
+                    </div>
+                    <svg className="w-5 h-8 text-rust" fill="none" viewBox="0 0 20 32" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 2v24m0 0l-6-6m6 6l6-6" />
+                    </svg>
+                    <div className="border-2 border-rust/30 rounded-lg p-3 bg-rust/5 w-full text-center">
+                      <div className="text-xs font-medium text-rust mb-1">{t('specs.guideManualSetup')}</div>
+                      <div className="text-[10px] text-rust/70">{t('specs.guideManualSetupDesc')}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Steps explanation */}
+            <div className="space-y-3">
+              <div className="flex gap-3 items-start">
+                <span className="w-6 h-6 rounded-full bg-forest text-cream flex items-center justify-center text-xs font-bold shrink-0">1</span>
+                <div>
+                  <p className="text-sm font-medium text-charcoal">{t('specs.guideStep1')}</p>
+                  <p className="text-xs text-warm-gray">{t('specs.guideStep1Desc')}</p>
+                </div>
+              </div>
+              <div className="flex gap-3 items-start">
+                <span className="w-6 h-6 rounded-full bg-forest text-cream flex items-center justify-center text-xs font-bold shrink-0">2</span>
+                <div>
+                  <p className="text-sm font-medium text-charcoal">{t('specs.guideStep2')}</p>
+                  <p className="text-xs text-warm-gray">{t('specs.guideStep2Desc')}</p>
+                </div>
+              </div>
+              <div className="flex gap-3 items-start">
+                <span className="w-6 h-6 rounded-full bg-forest text-cream flex items-center justify-center text-xs font-bold shrink-0">3</span>
+                <div>
+                  <p className="text-sm font-medium text-charcoal">{t('specs.guideStep3')}</p>
+                  <p className="text-xs text-warm-gray">{t('specs.guideStep3Desc')}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setShowSpecGuide(false)}
+                className="px-5 py-2 text-sm bg-charcoal text-cream rounded
+                           hover:bg-ink hover:shadow-md active:scale-95 transition-all"
+              >
+                {t('specs.guideGotIt')}
+              </button>
             </div>
           </div>
         </div>

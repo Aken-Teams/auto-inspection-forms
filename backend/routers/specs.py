@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 from database import get_db
 from models import FormType, FormSpec, SpecItem
 from services.spec_service import import_specs_from_excel, init_form_types
+from parsers.identifier import identify_form_type, _FORM_CODE_RE
 from config import UPLOAD_DIR
 
 router = APIRouter(prefix="/api/specs", tags=["specs"])
@@ -274,10 +275,11 @@ async def import_specs(
 
 
 @router.post("/analyze-file")
-async def analyze_file(file: UploadFile = File(...)):
+async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Analyze an Excel file structure for creating a new form type.
 
     Returns detected sheets, headers, content keywords, and suggested specs.
+    Also checks if the file matches an existing form type.
     """
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     filepath = os.path.join(UPLOAD_DIR, f"analyze_{uuid.uuid4().hex}_{file.filename}")
@@ -359,6 +361,26 @@ async def analyze_file(file: UploadFile = File(...)):
         id_keywords = [kw for kw, count in all_keywords.items()
                        if count >= max(1, sheet_count * 0.5) and 2 <= len(kw) <= 20]
 
+        # Extract form code from filename using regex
+        extracted_form_code = None
+        code_match = _FORM_CODE_RE.search(file.filename)
+        if code_match:
+            extracted_form_code = code_match.group(1).upper()
+
+        # Check if this file matches an existing form type
+        matched_form_code = None
+        sheet_contents = {}
+        for si in sheets_info:
+            sheet_contents[si["name"]] = " ".join(si.get("sample_keywords", []))
+        matched_form_code = identify_form_type(
+            file.filename, sheet_names, sheet_contents, db=db
+        )
+        # Only report as matched if it actually exists in DB
+        if matched_form_code:
+            existing = db.query(FormType).filter(FormType.form_code == matched_form_code).first()
+            if not existing:
+                matched_form_code = None
+
         return {
             "filename": file.filename,
             "total_sheets": len(data_sheets),
@@ -367,6 +389,8 @@ async def analyze_file(file: UploadFile = File(...)):
             "common_keywords": common_keywords[:10],
             "suggested_id_keywords": id_keywords[:5],
             "suggested_file_pattern": os.path.splitext(file.filename)[0],
+            "extracted_form_code": extracted_form_code,
+            "matched_form_code": matched_form_code,
         }
 
     finally:
@@ -385,8 +409,9 @@ async def create_from_file(
 
     Automatically creates:
     1. A FormType with file_pattern derived from filename
-    2. A FormSpec for each sheet (equipment)
-    3. SpecItems from detected headers (as 'skip' type, user can edit later)
+    2. A FormSpec for each data sheet (equipment)
+    Note: Spec items are NOT auto-created from raw data headers.
+    Users should import specs from a file with 汇总 sheet or set up manually.
     """
     # Check duplicate
     existing = db.query(FormType).filter(FormType.form_code == form_code).first()
@@ -403,14 +428,10 @@ async def create_from_file(
     try:
         wb = load_workbook(filepath, data_only=True)
         data_sheets = [s for s in wb.sheetnames if s != "汇总"]
+        has_summary = "汇总" in wb.sheetnames
 
-        # Derive file_pattern from filename (remove date/number suffixes, keep core)
-        base_name = os.path.splitext(file.filename)[0]
-        # Remove common date patterns
-        file_pattern = re.sub(r'\d{4}[年\-/]\d{1,2}[月\-/]?\d{0,2}[日]?', '', base_name).strip()
-        file_pattern = re.sub(r'\s+', ' ', file_pattern).strip()
-        if not file_pattern:
-            file_pattern = base_name
+        # Use form_code as file_pattern for reliable matching
+        file_pattern = re.escape(form_code)
 
         # Create form type
         ft = FormType(
@@ -423,52 +444,16 @@ async def create_from_file(
         db.flush()
 
         specs_created = 0
-        items_created = 0
 
+        # Create spec groups (one per data sheet) - no items yet
         for sn in data_sheets:
-            ws = wb[sn]
-
-            # Find header row
-            header_row = None
-            for row in range(1, min(20, ws.max_row + 1)):
-                non_empty = 0
-                for col in range(1, min(30, ws.max_column + 1)):
-                    if ws.cell(row=row, column=col).value is not None:
-                        non_empty += 1
-                if non_empty >= 3:
-                    header_row = row
-                    break
-
-            if not header_row:
-                continue
-
-            # Create spec group for this sheet
             spec = FormSpec(
                 form_type_id=ft.id,
                 equipment_id=sn,
                 equipment_name=sn,
             )
             db.add(spec)
-            db.flush()
             specs_created += 1
-
-            # Create spec items from headers (all as 'skip' initially)
-            col_idx = 0
-            for col in range(1, min(30, ws.max_column + 1)):
-                val = ws.cell(row=header_row, column=col).value
-                if val:
-                    label = str(val).replace("\n", " ").strip()
-                    if label and len(label) < 100:
-                        item = SpecItem(
-                            form_spec_id=spec.id,
-                            item_name=label,
-                            spec_type="skip",
-                            display_order=col_idx,
-                            group_name="data",
-                        )
-                        db.add(item)
-                        col_idx += 1
-                        items_created += 1
 
         wb.close()
         db.commit()
@@ -477,7 +462,7 @@ async def create_from_file(
             "success": True,
             "form_code": form_code,
             "specs_created": specs_created,
-            "items_created": items_created,
+            "has_summary": has_summary,
         }
 
     finally:

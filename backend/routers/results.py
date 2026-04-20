@@ -1,4 +1,5 @@
 """Results query API endpoints."""
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func as sql_func, case, distinct
@@ -6,6 +7,7 @@ from typing import Optional
 
 from database import get_db
 from models import UploadRecord, InspectionResult, FormType
+from config import UPLOAD_DIR
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 
@@ -202,3 +204,26 @@ def get_sheet_result(result_id: int, db: Session = Depends(get_db)):
         "raw_data": result.raw_data,
         "judged_data": result.judged_data,
     }
+
+
+@router.delete("/batches/{batch_id}")
+def delete_batch(batch_id: str, db: Session = Depends(get_db)):
+    """Delete an entire upload batch and its files/results."""
+    uploads = db.query(UploadRecord).filter(UploadRecord.batch_id == batch_id).all()
+    if not uploads:
+        raise HTTPException(404, "Batch not found")
+
+    deleted_files = 0
+    for upload in uploads:
+        # Clean up stored file
+        filepath = os.path.join(UPLOAD_DIR, upload.stored_filename)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+        db.delete(upload)  # cascade deletes InspectionResults
+        deleted_files += 1
+
+    db.commit()
+    return {"success": True, "deleted_files": deleted_files}

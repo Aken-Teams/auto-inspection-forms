@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
-import { getUploadBatches, downloadUpload, downloadBatch } from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { getUploadBatches, downloadUpload, downloadBatch, deleteBatch } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import type { UploadBatch, UploadListItem } from '../types';
 
@@ -16,6 +17,7 @@ export default function Results() {
   const [expandedBatch, setExpandedBatch] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
+  const [deletingBatch, setDeletingBatch] = useState<UploadBatch | null>(null);
   const navigate = useNavigate();
   const pageSize = 10;
 
@@ -62,6 +64,18 @@ export default function Results() {
       toast(t('upload.downloadFailed'), 'error');
     } finally {
       setDownloadingBatchId(null);
+    }
+  };
+
+  const handleDeleteBatch = async () => {
+    if (!deletingBatch) return;
+    try {
+      await deleteBatch(deletingBatch.batch_id);
+      setDeletingBatch(null);
+      loadBatches();
+    } catch (err) {
+      console.error(err);
+      toast(t('history.deleteFailed'), 'error');
     }
   };
 
@@ -167,19 +181,34 @@ export default function Results() {
                     {batch.upload_time ? new Date(batch.upload_time).toLocaleString('zh-CN') : ''}
                   </div>
 
-                  {/* Batch Download */}
-                  <button
-                    onClick={(e) => handleDownloadBatch(batch, e)}
-                    disabled={downloadingBatchId === batch.batch_id}
-                    className="px-3 py-1.5 text-xs text-charcoal border border-sand/50 rounded
-                               hover:bg-charcoal hover:text-cream hover:shadow-md
-                               active:scale-95 transition-all shrink-0 flex items-center gap-1.5
-                               disabled:opacity-50"
-                    title={t('upload.downloadAll')}
-                  >
-                    {downloadingBatchId === batch.batch_id ? <SpinnerIcon /> : <DownloadIcon />}
-                    {t('upload.downloadAll')}
-                  </button>
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={(e) => handleDownloadBatch(batch, e)}
+                      disabled={downloadingBatchId === batch.batch_id}
+                      className="px-3 py-1.5 text-xs text-charcoal border border-sand/50 rounded
+                                 hover:bg-charcoal hover:text-cream hover:shadow-md
+                                 active:scale-95 transition-all flex items-center gap-1.5
+                                 disabled:opacity-50"
+                      title={t('upload.downloadAll')}
+                    >
+                      {downloadingBatchId === batch.batch_id ? <SpinnerIcon /> : <DownloadIcon />}
+                      {t('upload.downloadAll')}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeletingBatch(batch); }}
+                      className="p-1.5 text-warm-gray rounded
+                                 hover:text-rust hover:bg-rust/10
+                                 active:scale-90 transition-all
+                                 opacity-0 group-hover:opacity-100"
+                      title={t('history.deleteBatch')}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Expanded: File List */}
@@ -222,6 +251,19 @@ export default function Results() {
           ))}
         </div>
       )}
+
+      {/* Delete Batch Confirm */}
+      <ConfirmDialog
+        open={!!deletingBatch}
+        title={t('history.deleteBatchTitle')}
+        message={t('history.deleteBatchConfirm', {
+          count: deletingBatch?.file_count || 0,
+          sheets: deletingBatch?.total_sheets || 0,
+        })}
+        onConfirm={handleDeleteBatch}
+        onCancel={() => setDeletingBatch(null)}
+        danger
+      />
     </div>
   );
 }
