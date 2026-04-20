@@ -3,7 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import { getFormSpecs, updateSpec } from '../api/client';
+import SpecVersionHistory from '../components/SpecVersionHistory';
 import type { FormSpec, SpecItemData } from '../types';
+
+const SPEC_TYPE_KEYS: Record<string, string> = {
+  range: 'specDetail.specTypeRange',
+  check: 'specDetail.specTypeCheck',
+  text: 'specDetail.specTypeText',
+  threshold: 'specDetail.specTypeThreshold',
+  min: 'specDetail.specTypeMin',
+  max: 'specDetail.specTypeMax',
+  exact: 'specDetail.specTypeExact',
+  skip: 'specDetail.specTypeSkip',
+};
 
 function formatSpecValue(item: SpecItemData): string {
   switch (item.spec_type) {
@@ -73,6 +85,8 @@ export default function SpecDetail() {
   const [editing, setEditing] = useState(false);
   const [editItems, setEditItems] = useState<EditItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  const [versionKey, setVersionKey] = useState(0);
 
   useEffect(() => {
     if (formCode && specId) loadSpec();
@@ -204,16 +218,31 @@ export default function SpecDetail() {
               </button>
             </>
           ) : (
-            <button
-              onClick={startEdit}
-              className="px-4 py-2 text-sm bg-charcoal text-cream rounded hover:bg-ink transition-colors tracking-wide flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              {t('specDetail.edit')}
-            </button>
+            <>
+              <button
+                onClick={() => setShowVersions(!showVersions)}
+                className={`px-4 py-2 text-sm border rounded tracking-wide flex items-center gap-2 transition-colors
+                  ${showVersions
+                    ? 'border-terracotta/50 text-terracotta bg-terracotta/5'
+                    : 'border-sand/50 text-warm-gray hover:text-charcoal hover:bg-paper'}`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {t('specs.versionHistory')}
+              </button>
+              <button
+                onClick={startEdit}
+                className="px-4 py-2 text-sm bg-charcoal text-cream rounded hover:bg-ink transition-colors tracking-wide flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                {t('specDetail.edit')}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -231,11 +260,11 @@ export default function SpecDetail() {
               <thead>
                 <tr className="bg-paper border-b border-sand/50">
                   <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide w-8">#</th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.itemName')}</th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.group')}</th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.subGroup')}</th>
-                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide">{t('specDetail.type')}</th>
-                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide">{t('specDetail.specValue')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.itemNameHint')}>{t('specDetail.itemName')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.groupHint')}>{t('specDetail.group')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.subGroupHint')}>{t('specDetail.subGroup')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
+                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide" title={t('specDetail.typeHint')}>{t('specDetail.type')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
+                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide" title={t('specDetail.specValueHint')}>{t('specDetail.specValue')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -249,7 +278,7 @@ export default function SpecDetail() {
                     <td className="px-4 py-2.5 text-warm-gray">{item.sub_group || '-'}</td>
                     <td className="px-4 py-2.5 text-center">
                       <span className="text-xs px-2 py-0.5 rounded bg-sand/30 text-charcoal">
-                        {item.spec_type}
+                        {t(SPEC_TYPE_KEYS[item.spec_type] || `specDetail.specTypeRange`)}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-center text-terracotta font-medium">
@@ -302,11 +331,13 @@ export default function SpecDetail() {
                     onChange={e => updateField(idx, 'spec_type', e.target.value)}
                     className="w-full border border-sand rounded px-2 py-1.5 text-sm focus:outline-none focus:border-terracotta bg-white"
                   >
-                    <option value="range">range</option>
-                    <option value="min">min</option>
-                    <option value="max">max</option>
-                    <option value="exact">exact</option>
-                    <option value="threshold">threshold</option>
+                    <option value="range">{t('specDetail.specTypeRange')}</option>
+                    <option value="check">{t('specDetail.specTypeCheck')}</option>
+                    <option value="text">{t('specDetail.specTypeText')}</option>
+                    <option value="threshold">{t('specDetail.specTypeThreshold')}</option>
+                    <option value="min">{t('specDetail.specTypeMin')}</option>
+                    <option value="max">{t('specDetail.specTypeMax')}</option>
+                    <option value="exact">{t('specDetail.specTypeExact')}</option>
                   </select>
                 </div>
                 <div>
@@ -376,6 +407,24 @@ export default function SpecDetail() {
             </svg>
             {t('specDetail.addItem')}
           </button>
+        </div>
+      )}
+
+      {/* Version History Panel */}
+      {showVersions && !editing && (
+        <div className="mt-6">
+          <h3 className="text-sm font-serif text-charcoal mb-3 flex items-center gap-2">
+            <svg className="w-4 h-4 text-terracotta" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {t('specs.versionHistory')}
+          </h3>
+          <SpecVersionHistory
+            key={versionKey}
+            specId={spec.id}
+            onRollback={() => { loadSpec(); setVersionKey(k => k + 1); }}
+          />
         </div>
       )}
     </div>

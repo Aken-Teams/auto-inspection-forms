@@ -93,6 +93,35 @@ export const createFromFile = (formCode: string, formName: string, file: File) =
 
 export const initFormTypes = () => api.post('/specs/init');
 
+// Spec Import Preview + Confirm
+export const previewImport = (formCode: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/specs/import/preview?form_code=${formCode}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+export const confirmImport = (formCode: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/specs/import/confirm?form_code=${formCode}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+// Spec Version History
+export const getSpecVersions = (specId: number) =>
+  api.get(`/specs/specs/${specId}/versions`);
+
+export const getVersionDetail = (specId: number, versionId: number) =>
+  api.get(`/specs/specs/${specId}/versions/${versionId}`);
+
+export const rollbackVersion = (specId: number, versionId: number) =>
+  api.post(`/specs/specs/${specId}/versions/${versionId}/rollback`);
+
 // Download
 export const downloadSheet = (resultId: number) =>
   api.get(`/download/sheet/${resultId}`, { responseType: 'blob' });

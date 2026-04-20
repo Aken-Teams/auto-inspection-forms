@@ -14,6 +14,7 @@ class FormType(Base):
     identifier_keywords = Column(JSON, nullable=True)
     file_pattern = Column(String(500), nullable=True)
     is_builtin = Column(Boolean, default=False)
+    structural_fingerprint = Column(JSON, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -93,3 +94,21 @@ class InspectionResult(Base):
 
     upload = relationship("UploadRecord", back_populates="results")
     form_spec = relationship("FormSpec")
+
+
+class SpecVersion(Base):
+    __tablename__ = "spec_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    form_spec_id = Column(Integer, ForeignKey("form_specs.id", ondelete="CASCADE"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    source = Column(String(50), nullable=False)
+    source_filename = Column(String(500), nullable=True)
+    stored_filepath = Column(String(500), nullable=True)
+    file_hash = Column(String(64), nullable=True)
+    items_snapshot = Column(JSON, nullable=False)
+    item_count = Column(Integer, default=0)
+    change_summary = Column(JSON, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    form_spec = relationship("FormSpec", backref="versions")

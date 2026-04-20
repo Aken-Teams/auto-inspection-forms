@@ -9,6 +9,7 @@ MYSQL_DB = os.getenv("MYSQL_DB")
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
+SPEC_DIR = os.getenv("SPEC_DIR", "./spec_files")
 
 DEEPSEEK_API_KEY = os.getenv("deepseek_api_key", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")

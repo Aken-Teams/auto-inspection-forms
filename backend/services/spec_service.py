@@ -46,7 +46,9 @@ def init_form_types(db: Session):
     db.commit()
 
 
-def import_specs_from_excel(db: Session, filepath: str, form_code: str):
+def import_specs_from_excel(db: Session, filepath: str, form_code: str,
+                            source_filename: str = None, stored_filepath: str = None,
+                            file_hash: str = None):
     """Import specs from the 汇总 sheet of an Excel file."""
     wb = load_workbook(filepath, data_only=True)
 
@@ -60,25 +62,44 @@ def import_specs_from_excel(db: Session, filepath: str, form_code: str):
         wb.close()
         return {"error": f"Form type {form_code} not found"}
 
+    # Pass file info to _get_or_create_spec for version tracking
+    _file_ctx = {
+        "source_filename": source_filename,
+        "stored_filepath": stored_filepath,
+        "file_hash": file_hash,
+    }
+
     if form_code == "F-QA1021":
-        _import_qa1021_specs(db, ws, form_type)
+        _import_qa1021_specs(db, ws, form_type, **_file_ctx)
     elif form_code == "F-RD09AA":
-        _import_rd09aa_specs(db, ws, form_type)
+        _import_rd09aa_specs(db, ws, form_type, **_file_ctx)
     elif form_code == "F-RD09AB":
-        _import_rd09ab_specs(db, ws, form_type)
+        _import_rd09ab_specs(db, ws, form_type, **_file_ctx)
     elif form_code == "F-RD09AJ":
-        _import_rd09aj_specs(db, ws, form_type)
+        _import_rd09aj_specs(db, ws, form_type, **_file_ctx)
     elif form_code == "F-RD09AK":
-        _import_rd09ak_specs(db, ws, form_type)
+        _import_rd09ak_specs(db, ws, form_type, **_file_ctx)
+    else:
+        # Non-built-in type: use AI generic parser
+        result = _import_generic_ai_specs(db, ws, form_type, **_file_ctx)
+        wb.close()
+        if result and result.get("error"):
+            return result
+        db.commit()
+        return result or {"success": True, "parse_method": "ai"}
 
     wb.close()
     db.commit()
-    return {"success": True}
+    return {"success": True, "parse_method": "builtin"}
 
 
 def _get_or_create_spec(db: Session, form_type_id: int, equipment_id: str,
-                        equipment_name: str = None, extra_info: dict = None) -> FormSpec:
-    """Get or create a FormSpec record."""
+                        equipment_name: str = None, extra_info: dict = None,
+                        source_filename: str = None, stored_filepath: str = None,
+                        file_hash: str = None) -> FormSpec:
+    """Get or create a FormSpec record. Snapshots existing items before overwrite."""
+    from services.spec_version_service import create_version_snapshot
+
     spec = db.query(FormSpec).filter(
         FormSpec.form_type_id == form_type_id,
         FormSpec.equipment_id == equipment_id,
@@ -93,6 +114,13 @@ def _get_or_create_spec(db: Session, form_type_id: int, equipment_id: str,
         db.add(spec)
         db.flush()
     else:
+        # Snapshot current items before overwriting
+        create_version_snapshot(
+            db, spec.id, source="import",
+            source_filename=source_filename,
+            stored_filepath=stored_filepath,
+            file_hash=file_hash,
+        )
         # Clear existing items for re-import
         db.query(SpecItem).filter(SpecItem.form_spec_id == spec.id).delete()
     return spec
@@ -130,7 +158,7 @@ def _cell_val(ws, row, col):
 
 
 # ─── F-QA1021 ───
-def _import_qa1021_specs(db: Session, ws, form_type):
+def _import_qa1021_specs(db: Session, ws, form_type, **file_ctx):
     """Import specs for 离子消散设备点检记录表.
 
     汇总 structure:
@@ -140,7 +168,7 @@ def _import_qa1021_specs(db: Session, ws, form_type):
     Row 5: RD-LZ-XX | √ | √ | √ | √ | √
     """
     # This form has a universal spec for all RD-LZ-XX equipment
-    spec = _get_or_create_spec(db, form_type.id, "RD-LZ-XX", "通用离子消散设备")
+    spec = _get_or_create_spec(db, form_type.id, "RD-LZ-XX", "通用离子消散设备", **file_ctx)
 
     items = [
         ("电源开关", "√", "离子风扇"),
@@ -155,7 +183,7 @@ def _import_qa1021_specs(db: Session, ws, form_type):
 
 
 # ─── F-RD09AA ───
-def _import_rd09aa_specs(db: Session, ws, form_type):
+def _import_rd09aa_specs(db: Session, ws, form_type, **file_ctx):
     """Import specs for Auto Mold 机台检查记录表.
 
     汇总 has blocks per machine, each block:
@@ -181,7 +209,7 @@ def _import_rd09aa_specs(db: Session, ws, form_type):
                 mold_no = _cell_val(ws, spec_row, 3)  # C column
 
                 extra = {"product_type": str(product) if product else "", "mold_no": str(mold_no) if mold_no else ""}
-                spec = _get_or_create_spec(db, form_type.id, machine_id, f"机台{machine_id}", extra)
+                spec = _get_or_create_spec(db, form_type.id, machine_id, f"机台{machine_id}", extra, **file_ctx)
 
                 order = 0
                 # D: 合模压力, E: 注塑压强, F: 固化时间, G: 注塑时间, H: 预热台温度
@@ -216,7 +244,7 @@ def _import_rd09aa_specs(db: Session, ws, form_type):
 
 
 # ─── F-RD09AB ───
-def _import_rd09ab_specs(db: Session, ws, form_type):
+def _import_rd09ab_specs(db: Session, ws, form_type, **file_ctx):
     """Import specs for Auto Mold 洗模检查记录表."""
     row = 1
     while row <= ws.max_row:
@@ -241,7 +269,7 @@ def _import_rd09ab_specs(db: Session, ws, form_type):
                 wash_key = f"{machine_id}_{reason}_{method}"
 
                 extra = {"wash_reason": str(reason), "wash_method": str(method)}
-                spec = _get_or_create_spec(db, form_type.id, wash_key, f"{machine_id} {reason}-{method}", extra)
+                spec = _get_or_create_spec(db, form_type.id, wash_key, f"{machine_id} {reason}-{method}", extra, **file_ctx)
 
                 order = 0
                 # D: 模数, E: 固化时间, F: 模具号, G: 合模压力, H: 注塑压强
@@ -291,7 +319,7 @@ def _import_rd09ab_specs(db: Session, ws, form_type):
 
 
 # ─── F-RD09AJ ───
-def _import_rd09aj_specs(db: Session, ws, form_type):
+def _import_rd09aj_specs(db: Session, ws, form_type, **file_ctx):
     """Import specs for RO焊接炉检查记录表.
 
     汇总 has blocks per furnace group:
@@ -310,7 +338,7 @@ def _import_rd09aj_specs(db: Session, ws, form_type):
                 row += 1
                 continue
 
-            spec = _get_or_create_spec(db, form_type.id, furnace_id, f"焊接炉{furnace_id}")
+            spec = _get_or_create_spec(db, form_type.id, furnace_id, f"焊接炉{furnace_id}", **file_ctx)
 
             # Spec values are in row+4 (4 rows down from header)
             spec_row = row + 4
@@ -352,7 +380,7 @@ def _import_rd09aj_specs(db: Session, ws, form_type):
 
 
 # ─── F-RD09AK ───
-def _import_rd09ak_specs(db: Session, ws, form_type):
+def _import_rd09ak_specs(db: Session, ws, form_type, **file_ctx):
     """Import specs for SMD(Clip）切弯脚尺寸检查记录表.
 
     汇总 has blocks per package/machine:
@@ -381,7 +409,7 @@ def _import_rd09ak_specs(db: Session, ws, form_type):
 
             spec_key = f"{machine_id}_{package}"
             extra = {"package": package, "machine_id": machine_id}
-            spec = _get_or_create_spec(db, form_type.id, spec_key, f"{machine_id} {package}", extra)
+            spec = _get_or_create_spec(db, form_type.id, spec_key, f"{machine_id} {package}", extra, **file_ctx)
 
             # Find measurement count from number row
             num_row = row + 3
@@ -418,3 +446,59 @@ def _import_rd09ak_specs(db: Session, ws, form_type):
             row = data_start + 5
         else:
             row += 1
+
+
+# ─── Generic AI-based import ───
+def _import_generic_ai_specs(db: Session, ws, form_type, **file_ctx):
+    """Import specs using AI analysis for non-built-in form types."""
+    from services.ai_spec_parser import ai_parse_summary_sheet, validate_summary_structure
+
+    # Validate structure first
+    validation = validate_summary_structure(ws)
+    if not validation["has_data"]:
+        return {"error": "Summary sheet has no data", "warnings": validation["warnings"]}
+
+    # AI parse
+    result = ai_parse_summary_sheet(ws, form_type.form_code, form_type.form_name)
+    if not result:
+        return {"error": "AI parsing failed. Please check if DeepSeek API is configured or try manual setup."}
+
+    equipment_specs = result.get("equipment_specs", [])
+    if not equipment_specs:
+        return {"error": "AI could not identify any equipment specs in the summary sheet"}
+
+    specs_created = 0
+    items_created = 0
+    for eq in equipment_specs:
+        eq_id = eq.get("equipment_id", "UNKNOWN")
+        eq_name = eq.get("equipment_name", eq_id)
+
+        spec = _get_or_create_spec(db, form_type.id, eq_id, eq_name, **file_ctx)
+        specs_created += 1
+
+        for i, item in enumerate(eq.get("items", [])):
+            parsed_spec = item.get("parsed_spec", {})
+            spec_item = SpecItem(
+                form_spec_id=spec.id,
+                item_name=item.get("item_name", f"item_{i}"),
+                spec_type=parsed_spec.get("spec_type", "text"),
+                min_value=parsed_spec.get("min_value"),
+                max_value=parsed_spec.get("max_value"),
+                expected_text=parsed_spec.get("expected_text"),
+                threshold_value=parsed_spec.get("threshold_value"),
+                threshold_operator=parsed_spec.get("threshold_operator"),
+                display_order=item.get("display_order", i),
+                group_name=item.get("group_name"),
+                sub_group=item.get("sub_group"),
+            )
+            db.add(spec_item)
+            items_created += 1
+
+    return {
+        "success": True,
+        "parse_method": "ai",
+        "ai_confidence": result.get("confidence"),
+        "specs_created": specs_created,
+        "items_created": items_created,
+        "analysis_notes": result.get("analysis_notes"),
+    }

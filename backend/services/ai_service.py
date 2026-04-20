@@ -24,7 +24,8 @@ def _get_client():
     return _client
 
 
-def _call_deepseek(messages: list[dict], temperature: float = 0.1) -> str | None:
+def _call_deepseek(messages: list[dict], temperature: float = 0.1,
+                   max_tokens: int = 2000) -> str | None:
     """Call DeepSeek chat API and return the response text."""
     if not DEEPSEEK_API_KEY:
         logger.warning("DeepSeek API key not configured")
@@ -38,7 +39,7 @@ def _call_deepseek(messages: list[dict], temperature: float = 0.1) -> str | None
                 "model": "deepseek-chat",
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": 2000,
+                "max_tokens": max_tokens,
             },
         )
         resp.raise_for_status()

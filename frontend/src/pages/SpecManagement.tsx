@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ImportPreviewDialog from '../components/ImportPreviewDialog';
 import { useToast } from '../components/Toast';
 import {
-  getFormTypes, getFormSpecs, deleteSpec, renameSpec, createSpec, importSpecs,
+  getFormTypes, getFormSpecs, deleteSpec, renameSpec, createSpec,
   createFormType, patchFormType, deleteFormType, analyzeFile, createFromFile,
 } from '../api/client';
 import type { FormType } from '../types';
@@ -141,18 +142,27 @@ export default function SpecManagement() {
     }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Import preview flow
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [showImportPreview, setShowImportPreview] = useState(false);
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      await importSpecs(activeType, file);
-      loadSpecs(activeType);
-      toast(t('specs.importSuccess'), 'success');
-    } catch (err) {
-      console.error(err);
-      toast(t('specs.importFailed'), 'error');
-    }
+    setImportFile(file);
+    setShowImportPreview(true);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleImportSuccess = () => {
+    setShowImportPreview(false);
+    setImportFile(null);
+    loadSpecs(activeType);
+  };
+
+  const handleImportCancel = () => {
+    setShowImportPreview(false);
+    setImportFile(null);
   };
 
   // Form type CRUD
@@ -398,23 +408,31 @@ export default function SpecManagement() {
                 className="px-4 py-2 text-sm bg-forest text-cream rounded
                            hover:bg-forest/90 hover:shadow-md active:scale-95
                            transition-all tracking-wide flex items-center gap-2"
+                title={t('specs.addGroupDesc')}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                {t('specs.addGroup')}
+                <div className="text-left">
+                  <div>{t('specs.addGroup')}</div>
+                  <div className="text-[10px] opacity-75 font-normal">{t('specs.addGroupDesc')}</div>
+                </div>
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="px-4 py-2 text-sm border border-terracotta/40 text-terracotta rounded
                            hover:bg-terracotta/10 hover:border-terracotta/60 hover:shadow-sm active:scale-95
                            transition-all tracking-wide flex items-center gap-2"
+                title={t('specs.importExcelDesc')}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
-                {t('specs.importExcel')}
+                <div className="text-left">
+                  <div>{t('specs.importExcel')}</div>
+                  <div className="text-[10px] opacity-60 font-normal">{t('specs.importExcelDesc')}</div>
+                </div>
               </button>
               <input
                 ref={fileInputRef}
@@ -547,6 +565,16 @@ export default function SpecManagement() {
         onConfirm={handleDeleteFormType}
         onCancel={() => setDeleteFormTypeTarget(null)}
         danger
+      />
+
+      {/* Import Preview Dialog */}
+      <ImportPreviewDialog
+        open={showImportPreview}
+        formCode={activeType}
+        file={importFile}
+        onSuccess={handleImportSuccess}
+        onCancel={handleImportCancel}
+        toast={toast}
       />
 
       {/* Rename Spec Group Dialog */}

@@ -55,6 +55,9 @@ def judge_sheet_data(db: Session, form_code: str, equipment_id: str, parsed_data
         if item.sub_group:
             spec_lookup_by_subgroup[(item.item_name, item.sub_group)] = item
 
+    # Build col_key -> header label mapping for GenericParser support
+    col_label_map = _build_col_label_map(parsed_data)
+
     # Judge each row
     judged_rows = []
     total_judgments = 0
@@ -67,7 +70,7 @@ def judge_sheet_data(db: Session, form_code: str, equipment_id: str, parsed_data
         judged_values = {}
         for key, raw_value in row_data.get("values", {}).items():
             # Find matching spec item
-            spec_item = _find_spec_for_key(spec_lookup, spec_lookup_by_subgroup, key, row_data, form_code)
+            spec_item = _find_spec_for_key(spec_lookup, spec_lookup_by_subgroup, key, row_data, form_code, col_label_map)
 
             if spec_item:
                 result = judge_value(
@@ -263,9 +266,32 @@ def _find_matching_spec(db: Session, form_type_id: int, equipment_id: str,
     return None
 
 
+def _build_col_label_map(parsed_data: dict) -> dict:
+    """Build a mapping from col_N keys to header labels for GenericParser data."""
+    col_map = {}
+    for h in parsed_data.get("headers", []):
+        if h.get("key", "").startswith("col_") and h.get("label"):
+            col_map[h["key"]] = h["label"]
+    return col_map
+
+
 def _find_spec_for_key(spec_lookup: dict, spec_lookup_by_subgroup: dict,
-                       key: str, row_data: dict, form_code: str) -> SpecItem | None:
+                       key: str, row_data: dict, form_code: str,
+                       col_label_map: dict | None = None) -> SpecItem | None:
     """Find the matching SpecItem for a parsed value key."""
+    # GenericParser col_N keys: map to header label and look up by label
+    if key.startswith("col_") and col_label_map:
+        label = col_label_map.get(key)
+        if label and label in spec_lookup:
+            return spec_lookup[label]
+        # Try partial/normalized matching (strip whitespace, case-insensitive)
+        if label:
+            label_norm = label.strip().lower()
+            for item_name, item in spec_lookup.items():
+                if item_name.strip().lower() == label_norm:
+                    return item
+        return None
+
     # Try sub_group-based matching first for F-RD09AK
     if form_code == "F-RD09AK":
         part = row_data.get("values", {}).get("part") or row_data.get("extra", {}).get("part", "")

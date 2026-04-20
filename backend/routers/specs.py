@@ -258,7 +258,7 @@ async def import_specs(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Import specs from an Excel file's 汇总 sheet."""
+    """Import specs from an Excel file's 汇总 sheet (legacy, kept for compatibility)."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     filepath = os.path.join(UPLOAD_DIR, f"spec_{uuid.uuid4().hex}_{file.filename}")
 
@@ -267,7 +267,98 @@ async def import_specs(
         f.write(content)
 
     try:
-        result = import_specs_from_excel(db, filepath, form_code)
+        # Store file permanently
+        from services.spec_file_service import store_spec_file
+        file_info = store_spec_file(content, form_code, file.filename)
+
+        result = import_specs_from_excel(
+            db, filepath, form_code,
+            source_filename=file.filename,
+            stored_filepath=file_info["stored_path"],
+            file_hash=file_info["file_hash"],
+        )
+        return result
+    finally:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+
+@router.post("/import/preview")
+async def preview_import_endpoint(
+    form_code: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Preview what an import would do WITHOUT committing changes.
+
+    Returns validation, parsed specs, and diffs for user review.
+    """
+    from services.import_preview_service import preview_import
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    filepath = os.path.join(UPLOAD_DIR, f"preview_{uuid.uuid4().hex}_{file.filename}")
+
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    try:
+        result = preview_import(db, filepath, content, form_code, file.filename)
+        return result
+    finally:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+
+@router.post("/import/confirm")
+async def confirm_import_endpoint(
+    form_code: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Execute import after user has reviewed the preview.
+
+    1. Store file permanently
+    2. Create version snapshots for affected specs
+    3. Import new specs
+    4. Save structural fingerprint
+    """
+    from services.spec_file_service import store_spec_file
+    from services.fingerprint_service import generate_fingerprint, save_fingerprint
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    filepath = os.path.join(UPLOAD_DIR, f"confirm_{uuid.uuid4().hex}_{file.filename}")
+
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    try:
+        # Store file permanently
+        file_info = store_spec_file(content, form_code, file.filename)
+
+        # Import with version tracking
+        result = import_specs_from_excel(
+            db, filepath, form_code,
+            source_filename=file.filename,
+            stored_filepath=file_info["stored_path"],
+            file_hash=file_info["file_hash"],
+        )
+
+        # Save structural fingerprint for future comparison
+        if result.get("success"):
+            try:
+                from openpyxl import load_workbook as _lw
+                wb2 = _lw(filepath, data_only=True)
+                if "汇总" in wb2.sheetnames:
+                    fp = generate_fingerprint(wb2["汇总"])
+                    save_fingerprint(db, form_code, fp)
+                    db.commit()
+                wb2.close()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to save fingerprint: {e}")
+
         return result
     finally:
         if os.path.exists(filepath):
@@ -475,3 +566,36 @@ def initialize_form_types(db: Session = Depends(get_db)):
     """Initialize form types in database."""
     init_form_types(db)
     return {"success": True, "message": "Form types initialized"}
+
+
+# ─── Version History Endpoints ───
+
+@router.get("/specs/{spec_id}/versions")
+def get_spec_versions(spec_id: int, db: Session = Depends(get_db)):
+    """List all versions for a spec, newest first."""
+    from services.spec_version_service import list_versions
+    spec = db.query(FormSpec).get(spec_id)
+    if not spec:
+        raise HTTPException(404, "Spec not found")
+    return list_versions(db, spec_id)
+
+
+@router.get("/specs/{spec_id}/versions/{version_id}")
+def get_version_detail_endpoint(spec_id: int, version_id: int, db: Session = Depends(get_db)):
+    """Get full detail of a specific version including items snapshot."""
+    from services.spec_version_service import get_version_detail
+    detail = get_version_detail(db, version_id)
+    if not detail or detail["form_spec_id"] != spec_id:
+        raise HTTPException(404, "Version not found")
+    return detail
+
+
+@router.post("/specs/{spec_id}/versions/{version_id}/rollback")
+def rollback_version_endpoint(spec_id: int, version_id: int, db: Session = Depends(get_db)):
+    """Rollback a spec to a specific version."""
+    from services.spec_version_service import rollback_to_version
+    result = rollback_to_version(db, spec_id, version_id)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    db.commit()
+    return result

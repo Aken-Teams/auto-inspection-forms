@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, inspect
 
 from database import engine, Base
+from models import SpecVersion
 from routers import upload, results, specs, download
 
 # Create tables
@@ -28,6 +29,12 @@ def _migrate():
             conn.execute(text("ALTER TABLE form_types ADD COLUMN is_builtin TINYINT(1) DEFAULT 0"))
             conn.execute(text("UPDATE form_types SET is_builtin = 1 WHERE form_code IN ('F-QA1021','F-RD09AA','F-RD09AB','F-RD09AJ','F-RD09AK')"))
             conn.commit()
+        if "structural_fingerprint" not in ft_cols:
+            conn.execute(text("ALTER TABLE form_types ADD COLUMN structural_fingerprint JSON DEFAULT NULL"))
+            conn.commit()
+        # Create spec_versions table
+        if "spec_versions" not in inspector.get_table_names():
+            SpecVersion.__table__.create(bind=engine)
 
 try:
     _migrate()
