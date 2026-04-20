@@ -40,7 +40,9 @@ def init_form_types(db: Session):
     for ft in form_types:
         existing = db.query(FormType).filter(FormType.form_code == ft["form_code"]).first()
         if not existing:
-            db.add(FormType(**ft))
+            db.add(FormType(**ft, is_builtin=True))
+        elif not existing.is_builtin:
+            existing.is_builtin = True
     db.commit()
 
 

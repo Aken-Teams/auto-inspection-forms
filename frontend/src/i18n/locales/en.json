@@ -28,13 +28,15 @@
     "featureSpecMatch": "Spec Matching",
     "featureSpecMatchDesc": "Forms with specs are auto-judged OK/NG for each inspection value",
     "featureBatch": "Batch Processing",
-    "featureBatchDesc": "Upload multiple files at once, each parsed and judged individually"
+    "featureBatchDesc": "Upload multiple files at once, each parsed and judged individually",
+    "downloadFailed": "Download failed, please try again"
   },
   "history": {
     "title": "Inspection History",
-    "totalRecords": "{{count}} upload records",
+    "totalRecords": "{{count}} upload batches",
     "batchDownload": "Batch Download ({{count}})",
-    "filename": "Filename",
+    "batchFiles": "files",
+    "filename": "File",
     "formType": "Form Type",
     "sheets": "Sheets",
     "ok": "OK",
@@ -47,7 +49,8 @@
     "empty": "No upload records yet",
     "unrecognized": "Unrecognized",
     "selectAll": "Select All",
-    "selected": "{{count}} selected"
+    "selected": "{{count}} selected",
+    "filterAll": "All"
   },
   "detail": {
     "backToList": "Back to list",
@@ -87,7 +90,32 @@
     "importFailed": "Import failed",
     "saveFailed": "Save failed",
     "deleteSuccess": "Deleted successfully",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "guideStep1": "Select Form Type",
+    "guideStep1Desc": "Each type corresponds to an Excel format. The system supports 5 standard formats.",
+    "guideStep2": "Manage Equipment Specs",
+    "guideStep2Desc": "Add spec groups or import from Excel. Each equipment has its own spec group.",
+    "guideStep3": "Configure Inspection Items",
+    "guideStep3Desc": "Click a spec group to configure each inspection item's specification values.",
+    "clickToViewItems": "Click to view items",
+    "formTypeList": "Form Types",
+    "addFormType": "Add Form Type",
+    "addFormTypeDesc": "Create a new form type and set file matching rules. The system will auto-identify uploaded files based on these rules.",
+    "editFormType": "Edit Form Type",
+    "editFormTypeDesc": "Modify the form name or file matching rules",
+    "editMapping": "Edit Mapping",
+    "formCode": "Form Code",
+    "formCodePlaceholder": "e.g. F-RD09XX",
+    "formNameLabel": "Form Name",
+    "formNamePlaceholder": "e.g. XXX Inspection Record",
+    "filePatternLabel": "File Pattern",
+    "filePatternPlaceholder": "e.g. welding or RD09AX",
+    "filePatternHint": "Enter a keyword or regex to match uploaded filenames",
+    "filePattern": "Pattern",
+    "builtIn": "Built-in",
+    "equipmentGroups": "equipment specs",
+    "confirmDeleteFormTypeTitle": "Delete Form Type",
+    "confirmDeleteFormType": "Are you sure you want to delete form type \"{{name}}\"? This cannot be undone. All related specs will be deleted."
   },
   "specDetail": {
     "backToList": "Back to spec list",

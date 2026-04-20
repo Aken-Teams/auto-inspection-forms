@@ -33,18 +33,19 @@ FORM_PATTERNS = {
 }
 
 
-def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = None) -> str | None:
+def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = None, db: Session = None) -> str | None:
     """Identify the form type from filename and sheet names.
 
     Args:
         filename: Original filename
         sheet_names: List of sheet names in the workbook
         sheet_contents: Optional dict of {sheet_name: first_few_rows_text} for content verification
+        db: Optional database session to check custom form type file_patterns
 
     Returns:
         Form code string (e.g., 'F-QA1021') or None
     """
-    # Step 1: Match by filename
+    # Step 1: Match by built-in filename keywords
     filename_matches = []
     for form_code, patterns in FORM_PATTERNS.items():
         for keyword in patterns["filename_keywords"]:
@@ -74,6 +75,20 @@ def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = 
             for keyword in patterns["sheet_keywords"]:
                 if keyword in all_text:
                     return form_code
+
+    # Step 4: Check custom form types with file_pattern from DB
+    if db:
+        custom_types = db.query(FormType).filter(
+            FormType.file_pattern.isnot(None),
+            FormType.file_pattern != "",
+        ).all()
+        for ft in custom_types:
+            try:
+                if re.search(ft.file_pattern, filename, re.IGNORECASE):
+                    return ft.form_code
+            except re.error:
+                if ft.file_pattern.lower() in filename.lower():
+                    return ft.form_code
 
     return None
 

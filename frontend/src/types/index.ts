@@ -87,11 +87,25 @@ export interface JudgedValue {
   spec: string;
 }
 
+export interface UploadBatch {
+  batch_id: string;
+  upload_time: string;
+  file_count: number;
+  total_sheets: number;
+  ok_count: number;
+  ng_count: number;
+  no_spec_count: number;
+  form_types: string[];
+  files: UploadListItem[];
+}
+
 export interface FormType {
   id: number;
   form_code: string;
   form_name: string;
   description: string | null;
+  file_pattern: string | null;
+  is_builtin: boolean;
   spec_count: number;
 }
 

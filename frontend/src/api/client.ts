@@ -25,8 +25,11 @@ export const uploadBatch = (files: File[]) => {
 };
 
 // Results
-export const getUploads = (page = 1, pageSize = 20) =>
-  api.get('/results', { params: { page, page_size: pageSize } });
+export const getUploads = (page = 1, pageSize = 20, formCode?: string) =>
+  api.get('/results', { params: { page, page_size: pageSize, form_code: formCode } });
+
+export const getUploadBatches = (page = 1, pageSize = 20) =>
+  api.get('/results/batches', { params: { page, page_size: pageSize } });
 
 export const getUploadDetail = (id: number) =>
   api.get(`/results/${id}`);
@@ -36,6 +39,15 @@ export const getSheetResult = (id: number) =>
 
 // Specs
 export const getFormTypes = () => api.get('/specs/form-types');
+
+export const createFormType = (data: { form_code: string; form_name: string; file_pattern?: string; description?: string }) =>
+  api.post('/specs/form-types', data);
+
+export const patchFormType = (formCode: string, data: { form_name?: string; file_pattern?: string; description?: string }) =>
+  api.patch(`/specs/form-types/${formCode}`, data);
+
+export const deleteFormType = (formCode: string) =>
+  api.delete(`/specs/form-types/${formCode}`);
 
 export const getFormSpecs = (formCode: string, includeItems = true) =>
   api.get(`/specs/form-types/${formCode}/specs`, { params: { include_items: includeItems } });

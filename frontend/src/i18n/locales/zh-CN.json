@@ -28,13 +28,15 @@
     "featureSpecMatch": "规格比对",
     "featureSpecMatchDesc": "已建立规格的表单将自动判定每个检测值的OK/NG",
     "featureBatch": "批量处理",
-    "featureBatchDesc": "支持同时上传多个文件，系统将逐一解析并生成判定结果"
+    "featureBatchDesc": "支持同时上传多个文件，系统将逐一解析并生成判定结果",
+    "downloadFailed": "下载失败，请稍后再试"
   },
   "history": {
     "title": "检验履历",
-    "totalRecords": "共 {{count}} 条上传记录",
+    "totalRecords": "共 {{count}} 个上传批次",
     "batchDownload": "批量下载 ({{count}})",
-    "filename": "文件名",
+    "batchFiles": "个文件",
+    "filename": "文件",
     "formType": "表单类型",
     "sheets": "工作表",
     "ok": "合格",
@@ -47,7 +49,8 @@
     "empty": "暂无上传记录",
     "unrecognized": "未识别",
     "selectAll": "全选",
-    "selected": "已选择 {{count}} 项"
+    "selected": "已选择 {{count}} 项",
+    "filterAll": "全部"
   },
   "detail": {
     "backToList": "返回列表",
@@ -87,7 +90,32 @@
     "importFailed": "导入失败",
     "saveFailed": "保存失败",
     "deleteSuccess": "删除成功",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "guideStep1": "选择表单类型",
+    "guideStep1Desc": "每种类型对应一种 Excel 点检表格式，系统支持 5 种标准格式",
+    "guideStep2": "管理设备规格",
+    "guideStep2Desc": "新增规格组或从 Excel 导入，每个设备有独立的规格组",
+    "guideStep3": "设定检验项目",
+    "guideStep3Desc": "点击规格组进入详细页面，设定每个检验项目的规格值",
+    "clickToViewItems": "点击查看检验项目",
+    "formTypeList": "表单类型",
+    "addFormType": "新增表单类型",
+    "addFormTypeDesc": "创建新的表单类型并设定文件匹配规则，系统将依据规则自动识别上传的文件",
+    "editFormType": "编辑表单类型",
+    "editFormTypeDesc": "修改表单名称或文件匹配规则",
+    "editMapping": "编辑匹配规则",
+    "formCode": "表单代码",
+    "formCodePlaceholder": "例如：F-RD09XX",
+    "formNameLabel": "表单名称",
+    "formNamePlaceholder": "例如：XXX 检查记录表",
+    "filePatternLabel": "文件匹配规则",
+    "filePatternPlaceholder": "例如：焊接 或 RD09AX",
+    "filePatternHint": "输入文件名中的关键字或正则表达式，系统将自动匹配上传的文件名",
+    "filePattern": "匹配规则",
+    "builtIn": "内置类型",
+    "equipmentGroups": "个设备规格",
+    "confirmDeleteFormTypeTitle": "删除表单类型",
+    "confirmDeleteFormType": "确定要删除表单类型「{{name}}」吗？此操作不可撤销，所有相关规格将一并删除。"
   },
   "specDetail": {
     "backToList": "返回规格列表",

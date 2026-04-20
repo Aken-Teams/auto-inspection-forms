@@ -40,6 +40,19 @@ class FormSpecCreate(BaseModel):
     equipment_name: str
 
 
+class FormTypeCreate(BaseModel):
+    form_code: str
+    form_name: str
+    file_pattern: Optional[str] = None
+    description: Optional[str] = None
+
+
+class FormTypePatch(BaseModel):
+    form_name: Optional[str] = None
+    file_pattern: Optional[str] = None
+    description: Optional[str] = None
+
+
 @router.get("/form-types")
 def list_form_types(db: Session = Depends(get_db)):
     """List all form types."""
@@ -50,10 +63,60 @@ def list_form_types(db: Session = Depends(get_db)):
             "form_code": ft.form_code,
             "form_name": ft.form_name,
             "description": ft.description,
+            "file_pattern": ft.file_pattern,
+            "is_builtin": ft.is_builtin,
             "spec_count": db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).count(),
         }
         for ft in types
     ]
+
+
+@router.post("/form-types")
+def create_form_type(data: FormTypeCreate, db: Session = Depends(get_db)):
+    """Create a new custom form type."""
+    existing = db.query(FormType).filter(FormType.form_code == data.form_code).first()
+    if existing:
+        raise HTTPException(409, f"Form type {data.form_code} already exists")
+
+    ft = FormType(
+        form_code=data.form_code,
+        form_name=data.form_name,
+        file_pattern=data.file_pattern,
+        description=data.description,
+        is_builtin=False,
+    )
+    db.add(ft)
+    db.commit()
+    return {"success": True, "id": ft.id, "form_code": ft.form_code}
+
+
+@router.patch("/form-types/{form_code}")
+def patch_form_type(form_code: str, data: FormTypePatch, db: Session = Depends(get_db)):
+    """Update a form type (name, file_pattern, description)."""
+    ft = db.query(FormType).filter(FormType.form_code == form_code).first()
+    if not ft:
+        raise HTTPException(404, f"Form type {form_code} not found")
+    if data.form_name is not None:
+        ft.form_name = data.form_name
+    if data.file_pattern is not None:
+        ft.file_pattern = data.file_pattern
+    if data.description is not None:
+        ft.description = data.description
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/form-types/{form_code}")
+def delete_form_type(form_code: str, db: Session = Depends(get_db)):
+    """Delete a custom form type and all its specs."""
+    ft = db.query(FormType).filter(FormType.form_code == form_code).first()
+    if not ft:
+        raise HTTPException(404, f"Form type {form_code} not found")
+    if ft.is_builtin:
+        raise HTTPException(400, "Cannot delete built-in form types")
+    db.delete(ft)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/form-types/{form_code}/specs")

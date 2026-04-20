@@ -46,9 +46,11 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         f.write(content)
 
     # Create upload record
+    batch_id = uuid.uuid4().hex
     upload = UploadRecord(
         original_filename=file.filename,
         stored_filename=stored_name,
+        batch_id=batch_id,
         status="processing",
     )
     db.add(upload)
@@ -78,6 +80,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 @router.post("/batch")
 async def upload_batch(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
     """Upload multiple Excel files for batch inspection."""
+    batch_id = uuid.uuid4().hex
     results = []
     for file in files:
         if not file.filename.endswith((".xlsx", ".xls")):
@@ -95,6 +98,7 @@ async def upload_batch(files: list[UploadFile] = File(...), db: Session = Depend
         upload = UploadRecord(
             original_filename=file.filename,
             stored_filename=stored_name,
+            batch_id=batch_id,
             status="processing",
         )
         db.add(upload)
@@ -122,7 +126,7 @@ async def upload_batch(files: list[UploadFile] = File(...), db: Session = Depend
             results.append({"filename": file.filename, "error": str(e)})
 
     db.commit()
-    return {"total_files": len(files), "results": results}
+    return {"batch_id": batch_id, "total_files": len(files), "results": results}
 
 
 def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: str) -> list:
@@ -145,7 +149,7 @@ def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: st
                     text_parts.append(str(val))
         sheet_contents[sn] = " ".join(text_parts)
 
-    form_code = identify_form_type(filename, sheet_names, sheet_contents)
+    form_code = identify_form_type(filename, sheet_names, sheet_contents, db=db)
 
     if form_code:
         form_type = get_form_type_from_db(db, form_code)

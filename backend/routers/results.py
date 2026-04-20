@@ -1,12 +1,93 @@
 """Results query API endpoints."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func as sql_func, case, distinct
 from typing import Optional
 
 from database import get_db
 from models import UploadRecord, InspectionResult, FormType
 
 router = APIRouter(prefix="/api/results", tags=["results"])
+
+
+@router.get("/batches")
+def list_batches(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """List upload batches grouped by batch_id."""
+    # Subquery: aggregate per batch_id
+    batch_q = (
+        db.query(
+            UploadRecord.batch_id,
+            sql_func.count(UploadRecord.id).label("file_count"),
+            sql_func.min(UploadRecord.upload_time).label("upload_time"),
+        )
+        .filter(UploadRecord.batch_id.isnot(None))
+        .group_by(UploadRecord.batch_id)
+        .order_by(sql_func.min(UploadRecord.upload_time).desc())
+    )
+
+    total = batch_q.count()
+    batches = batch_q.offset((page - 1) * page_size).limit(page_size).all()
+
+    results = []
+    for batch_id, file_count, upload_time in batches:
+        # Get uploads in this batch with result counts
+        uploads = (
+            db.query(UploadRecord)
+            .options(joinedload(UploadRecord.form_type))
+            .filter(UploadRecord.batch_id == batch_id)
+            .order_by(UploadRecord.id)
+            .all()
+        )
+
+        # Aggregate stats across all files in batch
+        total_ok = 0
+        total_ng = 0
+        total_no_spec = 0
+        total_sheets = 0
+        form_types_seen = set()
+        files = []
+
+        for u in uploads:
+            sheet_results = db.query(InspectionResult).filter(InspectionResult.upload_id == u.id).all()
+            ok = sum(1 for r in sheet_results if r.overall_result == "OK")
+            ng = sum(1 for r in sheet_results if r.overall_result == "NG")
+            no_spec = sum(1 for r in sheet_results if r.overall_result == "NO_SPEC")
+            total_ok += ok
+            total_ng += ng
+            total_no_spec += no_spec
+            total_sheets += u.total_sheets
+            if u.form_type:
+                form_types_seen.add(u.form_type.form_code)
+
+            files.append({
+                "id": u.id,
+                "filename": u.original_filename,
+                "form_code": u.form_type.form_code if u.form_type else None,
+                "form_name": u.form_type.form_name if u.form_type else "未识别",
+                "total_sheets": u.total_sheets,
+                "ok_count": ok,
+                "ng_count": ng,
+                "no_spec_count": no_spec,
+                "status": u.status,
+            })
+
+        results.append({
+            "batch_id": batch_id,
+            "upload_time": upload_time.isoformat() if upload_time else None,
+            "file_count": file_count,
+            "total_sheets": total_sheets,
+            "ok_count": total_ok,
+            "ng_count": total_ng,
+            "no_spec_count": total_no_spec,
+            "form_types": list(form_types_seen),
+            "files": files,
+        })
+
+    return {"total": total, "page": page, "page_size": page_size, "items": results}
 
 
 @router.get("")

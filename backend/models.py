@@ -12,6 +12,8 @@ class FormType(Base):
     form_name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     identifier_keywords = Column(JSON, nullable=True)
+    file_pattern = Column(String(500), nullable=True)
+    is_builtin = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -60,6 +62,7 @@ class UploadRecord(Base):
     __tablename__ = "upload_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(String(36), nullable=True, index=True)
     original_filename = Column(String(500), nullable=False)
     stored_filename = Column(String(500), nullable=False)
     form_type_id = Column(Integer, ForeignKey("form_types.id"), nullable=True)

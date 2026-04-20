@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import StatusBadge from '../components/StatusBadge';
 import InspectionTable from '../components/InspectionTable';
 import { getUploadDetail, downloadUpload, downloadSheet } from '../api/client';
+import { downloadBlob } from '../utils/download';
 import type { UploadDetail, SheetResult } from '../types';
 
 export default function ResultDetail() {
@@ -13,6 +14,8 @@ export default function ResultDetail() {
   const [detail, setDetail] = useState<UploadDetail | null>(null);
   const [activeSheet, setActiveSheet] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadingSheet, setDownloadingSheet] = useState(false);
 
   useEffect(() => {
     if (id) loadDetail(parseInt(id));
@@ -32,30 +35,28 @@ export default function ResultDetail() {
 
   const handleDownloadAll = async () => {
     if (!detail) return;
+    setDownloadingAll(true);
     try {
       const res = await downloadUpload(detail.id);
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = detail.filename.replace('.xlsx', '_判定结果.xlsx');
-      a.click();
-      window.URL.revokeObjectURL(url);
+      downloadBlob(res.data, detail.filename.replace('.xlsx', '_判定结果.xlsx'));
     } catch (err) {
       console.error(err);
+      alert(t('upload.downloadFailed'));
+    } finally {
+      setDownloadingAll(false);
     }
   };
 
   const handleDownloadSheet = async (result: SheetResult) => {
+    setDownloadingSheet(true);
     try {
       const res = await downloadSheet(result.id);
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${result.sheet_name}_判定结果.xlsx`;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      downloadBlob(res.data, `${result.sheet_name}_判定结果.xlsx`);
     } catch (err) {
       console.error(err);
+      alert(t('upload.downloadFailed'));
+    } finally {
+      setDownloadingSheet(false);
     }
   };
 
@@ -84,7 +85,7 @@ export default function ResultDetail() {
         <div>
           <button
             onClick={() => navigate('/history')}
-            className="text-xs text-warm-gray hover:text-terracotta transition-colors tracking-wide mb-2 inline-block"
+            className="text-xs text-warm-gray hover:text-terracotta hover:underline transition-colors tracking-wide mb-2 inline-block"
           >
             &larr; {t('detail.backToList')}
           </button>
@@ -100,12 +101,22 @@ export default function ResultDetail() {
         </div>
         <button
           onClick={handleDownloadAll}
-          className="px-4 py-2 bg-charcoal text-cream text-sm rounded hover:bg-ink transition-colors tracking-wide flex items-center gap-2"
+          disabled={downloadingAll}
+          className="px-4 py-2 bg-charcoal text-cream text-sm rounded
+                     hover:bg-ink hover:shadow-md active:scale-95 transition-all
+                     tracking-wide flex items-center gap-2 disabled:opacity-50"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
+          {downloadingAll ? (
+            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          )}
           {t('detail.downloadAll')}
         </button>
       </div>
@@ -136,22 +147,24 @@ export default function ResultDetail() {
         </div>
       </div>
 
-      {/* Sheet Tabs */}
-      <div className="flex gap-1 border-b border-sand/50 overflow-x-auto pb-0">
-        {detail.sheets.map((sheet, i) => (
-          <button
-            key={sheet.id}
-            onClick={() => setActiveSheet(i)}
-            className={`px-4 py-2 text-sm whitespace-nowrap transition-all rounded-t flex items-center gap-2
-              ${activeSheet === i
-                ? 'bg-white border border-b-0 border-sand/50 text-charcoal font-medium -mb-[1px]'
-                : 'text-warm-gray hover:text-charcoal hover:bg-paper/50'
-              }`}
-          >
-            {sheet.sheet_name}
-            <StatusBadge status={sheet.overall_result} size="sm" />
-          </button>
-        ))}
+      {/* Sheet Tabs - horizontal scroll only */}
+      <div className="border-b border-sand/50">
+        <div className="flex gap-1 overflow-x-auto scrollbar-hide pb-0">
+          {detail.sheets.map((sheet, i) => (
+            <button
+              key={sheet.id}
+              onClick={() => setActiveSheet(i)}
+              className={`px-4 py-2 text-sm whitespace-nowrap transition-all rounded-t flex items-center gap-2 shrink-0
+                ${activeSheet === i
+                  ? 'bg-white border border-b-0 border-sand/50 text-charcoal font-medium -mb-[1px]'
+                  : 'text-warm-gray hover:text-charcoal hover:bg-paper/50'
+                }`}
+            >
+              {sheet.sheet_name}
+              <StatusBadge status={sheet.overall_result} size="sm" />
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Active Sheet Content */}
@@ -169,8 +182,23 @@ export default function ResultDetail() {
             </div>
             <button
               onClick={() => handleDownloadSheet(currentSheet)}
-              className="text-xs text-terracotta hover:text-rust transition-colors tracking-wide"
+              disabled={downloadingSheet}
+              className="text-xs text-terracotta tracking-wide
+                         px-3 py-1.5 rounded border border-terracotta/30
+                         hover:bg-terracotta/10 hover:border-terracotta/50 hover:shadow-sm
+                         active:scale-95 transition-all disabled:opacity-50
+                         flex items-center gap-1.5"
             >
+              {downloadingSheet ? (
+                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              )}
               {t('detail.downloadSheet')}
             </button>
           </div>
