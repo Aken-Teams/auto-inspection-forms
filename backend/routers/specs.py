@@ -6,11 +6,13 @@ from typing import Optional
 import os
 import re
 import uuid
+import shutil
 from collections import Counter
 from openpyxl import load_workbook
 
 from database import get_db
-from models import FormType, FormSpec, SpecItem
+from models import FormType, FormSpec, SpecItem, UploadRecord, SpecVersion, InspectionResult
+from config import SPEC_DIR
 from services.spec_service import import_specs_from_excel, init_form_types
 from parsers.identifier import identify_form_type, _FORM_CODE_RE
 from config import UPLOAD_DIR
@@ -116,8 +118,25 @@ def delete_form_type(form_code: str, db: Session = Depends(get_db)):
     ft = db.query(FormType).filter(FormType.form_code == form_code).first()
     if not ft:
         raise HTTPException(404, f"Form type {form_code} not found")
+    # Nullify FK in upload_records to avoid constraint violation
+    db.query(UploadRecord).filter(UploadRecord.form_type_id == ft.id).update(
+        {"form_type_id": None}, synchronize_session=False
+    )
+    # Clear FKs referencing form_specs, then delete specs
+    spec_ids = [s.id for s in db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).all()]
+    if spec_ids:
+        db.query(InspectionResult).filter(InspectionResult.form_spec_id.in_(spec_ids)).update(
+            {"form_spec_id": None}, synchronize_session=False
+        )
+        db.query(SpecVersion).filter(SpecVersion.form_spec_id.in_(spec_ids)).delete(synchronize_session=False)
+        db.query(SpecItem).filter(SpecItem.form_spec_id.in_(spec_ids)).delete(synchronize_session=False)
+        db.query(FormSpec).filter(FormSpec.id.in_(spec_ids)).delete(synchronize_session=False)
     db.delete(ft)
     db.commit()
+    # Clean up stored spec files
+    spec_dir = os.path.join(SPEC_DIR, form_code)
+    if os.path.isdir(spec_dir):
+        shutil.rmtree(spec_dir, ignore_errors=True)
     return {"success": True}
 
 
@@ -548,6 +567,16 @@ async def create_from_file(
 
         wb.close()
         db.commit()
+
+        # Store file permanently in spec_files/
+        spec_dir = os.path.join(SPEC_DIR, form_code)
+        os.makedirs(spec_dir, exist_ok=True)
+        import hashlib
+        file_hash = hashlib.sha256(content).hexdigest()[:12]
+        stored_name = f"{file_hash}_{file.filename}"
+        stored_path = os.path.join(spec_dir, stored_name)
+        with open(stored_path, "wb") as sf:
+            sf.write(content)
 
         return {
             "success": True,

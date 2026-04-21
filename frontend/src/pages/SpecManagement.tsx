@@ -56,15 +56,20 @@ export default function SpecManagement() {
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
 
-  // Form type dialogs
+  // Form type dialogs - batch upload
+  interface BatchItem {
+    file: File;
+    status: 'analyzing' | 'done' | 'error';
+    analysis: AnalysisResult | null;
+    error: string | null;
+    formCode: string;
+    formName: string;
+  }
   const [showAddFormType, setShowAddFormType] = useState(false);
   const [addFtStep, setAddFtStep] = useState<1 | 2>(1);
-  const [addFtFile, setAddFtFile] = useState<File | null>(null);
-  const [addFtAnalysis, setAddFtAnalysis] = useState<AnalysisResult | null>(null);
-  const [addFtAnalyzing, setAddFtAnalyzing] = useState(false);
+  const [addFtItems, setAddFtItems] = useState<BatchItem[]>([]);
   const [addFtCreating, setAddFtCreating] = useState(false);
-  const [newFtCode, setNewFtCode] = useState('');
-  const [newFtName, setNewFtName] = useState('');
+  const [addFtCreateDone, setAddFtCreateDone] = useState(0);
   const addFtFileRef = useRef<HTMLInputElement>(null);
   const [editingFormType, setEditingFormType] = useState<FormType | null>(null);
   const [editFtName, setEditFtName] = useState('');
@@ -169,55 +174,65 @@ export default function SpecManagement() {
   const resetAddFormType = () => {
     setShowAddFormType(false);
     setAddFtStep(1);
-    setAddFtFile(null);
-    setAddFtAnalysis(null);
-    setAddFtAnalyzing(false);
+    setAddFtItems([]);
     setAddFtCreating(false);
-    setNewFtCode('');
-    setNewFtName('');
+    setAddFtCreateDone(0);
   };
 
-  const handleAnalyzeFile = async (file: File) => {
-    setAddFtFile(file);
-    setAddFtAnalyzing(true);
-    try {
-      const res = await analyzeFile(file);
-      const analysis = res.data as AnalysisResult;
-      setAddFtAnalysis(analysis);
+  const handleAnalyzeFiles = async (files: File[]) => {
+    const newItems: BatchItem[] = files.map(f => ({
+      file: f, status: 'analyzing' as const, analysis: null, error: null, formCode: '', formName: '',
+    }));
+    setAddFtItems(prev => [...prev, ...newItems]);
+    const startIdx = addFtItems.length;
 
-      // Use extracted form code from backend (regex-based) as suggested code
-      if (analysis.extracted_form_code) {
-        setNewFtCode(analysis.extracted_form_code);
-      } else {
-        // Fallback: derive from filename
+    await Promise.allSettled(files.map(async (file, i) => {
+      const idx = startIdx + i;
+      try {
+        const res = await analyzeFile(file);
+        const analysis = res.data as AnalysisResult;
         const baseName = file.name.replace(/\.[^.]+$/, '');
-        setNewFtCode(baseName.substring(0, 20));
+        const code = analysis.extracted_form_code || baseName.substring(0, 20);
+        setAddFtItems(prev => prev.map((it, j) => j === idx
+          ? { ...it, status: 'done', analysis, formCode: code, formName: baseName } : it));
+      } catch (err: any) {
+        setAddFtItems(prev => prev.map((it, j) => j === idx
+          ? { ...it, status: 'error', error: err.response?.data?.detail || t('specs.analyzeFailed') } : it));
       }
-
-      // Suggest form name from filename (remove code and extension)
-      const baseName = file.name.replace(/\.[^.]+$/, '');
-      setNewFtName(baseName);
-      setAddFtStep(2);
-    } catch (err: any) {
-      toast(err.response?.data?.detail || t('specs.analyzeFailed'), 'error');
-      setAddFtFile(null);
-    } finally {
-      setAddFtAnalyzing(false);
-    }
+    }));
   };
 
-  const handleCreateFromFile = async () => {
-    if (!newFtCode.trim() || !newFtName.trim() || !addFtFile) return;
+  const updateBatchItem = (idx: number, field: 'formCode' | 'formName', value: string) => {
+    setAddFtItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+  };
+
+  const removeBatchItem = (idx: number) => {
+    setAddFtItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleBatchCreate = async () => {
+    const valid = addFtItems.filter(it => it.status === 'done' && it.formCode.trim() && it.formName.trim());
+    if (valid.length === 0) return;
     setAddFtCreating(true);
-    try {
-      await createFromFile(newFtCode.trim(), newFtName.trim(), addFtFile);
-      const savedCode = newFtCode.trim();
+    setAddFtCreateDone(0);
+    let lastCode = '';
+    let successCount = 0;
+    for (const item of valid) {
+      try {
+        await createFromFile(item.formCode.trim(), item.formName.trim(), item.file);
+        lastCode = item.formCode.trim();
+        successCount++;
+        setAddFtCreateDone(prev => prev + 1);
+      } catch (err: any) {
+        toast(`${item.formCode}: ${err.response?.data?.detail || t('specs.saveFailed')}`, 'error');
+      }
+    }
+    if (successCount > 0) {
+      toast(t('specs.batchCreateSuccess', { count: successCount }), 'success');
       resetAddFormType();
       await loadFormTypes();
-      setActiveType(savedCode);
-    } catch (err: any) {
-      toast(err.response?.data?.detail || t('specs.saveFailed'), 'error');
-    } finally {
+      if (lastCode) setActiveType(lastCode);
+    } else {
       setAddFtCreating(false);
     }
   };
@@ -651,7 +666,7 @@ export default function SpecManagement() {
         </div>
       )}
 
-      {/* Add Form Type Dialog - Upload-driven wizard */}
+      {/* Add Form Type Dialog - Batch Upload Wizard */}
       {showAddFormType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="fixed inset-0 bg-ink/40" onClick={resetAddFormType} />
@@ -674,187 +689,161 @@ export default function SpecManagement() {
               </div>
             </div>
 
-            {/* Step 1: Upload file */}
+            {/* Step 1: Upload files */}
             {addFtStep === 1 && (
-              <div>
-                {addFtAnalyzing ? (
-                  <div className="text-center py-12">
-                    <div className="inline-block w-8 h-8 border-2 border-forest/30 border-t-forest rounded-full animate-spin mb-3" />
-                    <p className="text-sm text-warm-gray">{t('specs.analyzing')}</p>
-                  </div>
-                ) : (
-                  <div
-                    className="border-2 border-dashed border-sand rounded-lg p-10 text-center
-                               hover:border-terracotta/40 hover:bg-terracotta/5 transition-all cursor-pointer"
-                    onClick={() => addFtFileRef.current?.click()}
-                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
-                    onDrop={e => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const file = e.dataTransfer.files?.[0];
-                      if (file && /\.xlsx?$/i.test(file.name)) handleAnalyzeFile(file);
-                    }}
-                  >
-                    <svg className="mx-auto w-10 h-10 text-sand mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p className="text-sm text-charcoal mb-1">{t('specs.uploadSampleFile')}</p>
-                    <p className="text-xs text-warm-gray">{t('specs.uploadSampleHint')}</p>
-                    <input
-                      ref={addFtFileRef}
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={e => {
-                        const file = e.target.files?.[0];
-                        if (file) handleAnalyzeFile(file);
-                        if (addFtFileRef.current) addFtFileRef.current.value = '';
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Step 2: Review analysis + confirm */}
-            {addFtStep === 2 && addFtAnalysis && (
               <div className="space-y-4">
-                {/* Warning: file matches existing form type */}
-                {addFtAnalysis.matched_form_code && (
-                  <div className="bg-rust/10 rounded-lg p-4 border border-rust/30">
-                    <div className="flex items-start gap-2">
-                      <svg className="w-4 h-4 text-rust shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-medium text-rust">{t('specs.fileMatchesExisting')}</p>
-                        <p className="text-xs text-rust/80 mt-0.5">
-                          {t('specs.fileMatchesExistingDesc', { code: addFtAnalysis.matched_form_code })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Warning: no summary sheet */}
-                {!addFtAnalysis.has_summary && (
-                  <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
-                    <div className="flex items-start gap-2">
-                      <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-medium text-amber-700">{t('specs.noSummarySheet')}</p>
-                        <p className="text-xs text-amber-600 mt-0.5">{t('specs.noSummarySheetDesc')}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Analysis summary */}
-                <div className="bg-paper rounded-lg p-4 border border-sand/30">
-                  <div className="flex items-center gap-2 mb-3">
-                    <svg className="w-4 h-4 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="text-sm font-medium text-charcoal">{t('specs.analysisResult')}</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div>
-                      <span className="text-warm-gray">{t('specs.detectedSheets')}</span>
-                      <p className="text-charcoal font-medium">{addFtAnalysis.total_sheets}</p>
-                    </div>
-                    <div>
-                      <span className="text-warm-gray">{t('specs.hasSummary')}</span>
-                      <p className={`font-medium ${addFtAnalysis.has_summary ? 'text-forest' : 'text-rust'}`}>
-                        {addFtAnalysis.has_summary ? t('specs.yes') : t('specs.no')}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-warm-gray">{t('specs.sourceFile')}</span>
-                      <p className="text-charcoal font-medium truncate" title={addFtAnalysis.filename}>{addFtAnalysis.filename}</p>
-                    </div>
-                  </div>
+                <div
+                  className="border-2 border-dashed border-sand rounded-lg p-10 text-center
+                             hover:border-terracotta/40 hover:bg-terracotta/5 transition-all cursor-pointer"
+                  onClick={() => addFtFileRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const files = Array.from(e.dataTransfer.files).filter(f => /\.xlsx?$/i.test(f.name));
+                    if (files.length > 0) handleAnalyzeFiles(files);
+                  }}
+                >
+                  <svg className="mx-auto w-10 h-10 text-sand mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="text-sm text-charcoal mb-1">{t('specs.uploadSampleFile')}</p>
+                  <p className="text-xs text-warm-gray">{t('specs.batchUploadHint')}</p>
+                  <input
+                    ref={addFtFileRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    multiple
+                    className="hidden"
+                    onChange={e => {
+                      const files = Array.from(e.target.files || []);
+                      if (files.length > 0) handleAnalyzeFiles(files);
+                      if (addFtFileRef.current) addFtFileRef.current.value = '';
+                    }}
+                  />
                 </div>
 
-                {/* Detected sheets preview */}
-                {addFtAnalysis.sheets.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-medium text-charcoal mb-2">{t('specs.detectedEquipment')}</h4>
-                    <div className="max-h-40 overflow-y-auto border border-sand/30 rounded-lg">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-paper border-b border-sand/30 sticky top-0">
-                            <th className="px-3 py-1.5 text-left font-medium text-charcoal">{t('specs.sheetName')}</th>
-                            <th className="px-3 py-1.5 text-center font-medium text-charcoal">{t('specs.dataRows')}</th>
-                            <th className="px-3 py-1.5 text-left font-medium text-charcoal">{t('specs.headers')}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {addFtAnalysis.sheets.map((sheet, i) => (
-                            <tr key={i} className="border-b border-sand/20">
-                              <td className="px-3 py-1.5 text-charcoal font-medium">{sheet.name}</td>
-                              <td className="px-3 py-1.5 text-center text-warm-gray">{sheet.data_rows}</td>
-                              <td className="px-3 py-1.5 text-warm-gray truncate max-w-[200px]"
-                                  title={sheet.headers.join(', ')}>
-                                {sheet.headers.slice(0, 5).join(', ')}
-                                {sheet.headers.length > 5 && '...'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                {/* File list with status */}
+                {addFtItems.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-charcoal font-medium">
+                        {t('specs.filesSelected', { count: addFtItems.length })}
+                      </span>
+                      {addFtItems.some(it => it.status === 'analyzing') && (
+                        <span className="text-xs text-warm-gray">
+                          {t('specs.analyzeProgress', {
+                            done: addFtItems.filter(it => it.status !== 'analyzing').length,
+                            total: addFtItems.length,
+                          })}
+                        </span>
+                      )}
                     </div>
+                    {addFtItems.map((item, idx) => (
+                      <div key={idx} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm
+                        ${item.status === 'error' ? 'border-rust/30 bg-rust/5' : 'border-sand/50 bg-paper'}`}>
+                        {item.status === 'analyzing' && (
+                          <div className="w-4 h-4 border-2 border-forest/30 border-t-forest rounded-full animate-spin shrink-0" />
+                        )}
+                        {item.status === 'done' && (
+                          <svg className="w-4 h-4 text-forest shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                        {item.status === 'error' && (
+                          <svg className="w-4 h-4 text-rust shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        )}
+                        <span className="flex-1 truncate text-charcoal">{item.file.name}</span>
+                        {item.status === 'done' && item.analysis && (
+                          <span className="text-xs text-warm-gray shrink-0">{item.analysis.total_sheets} sheets</span>
+                        )}
+                        {item.status === 'error' && (
+                          <span className="text-xs text-rust shrink-0 max-w-[150px] truncate">{item.error}</span>
+                        )}
+                        <button onClick={() => removeBatchItem(idx)}
+                          className="text-warm-gray hover:text-rust shrink-0">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
-
-                {/* Form code + name inputs */}
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formCode')}</label>
-                    <input
-                      type="text"
-                      value={newFtCode}
-                      onChange={e => setNewFtCode(e.target.value)}
-                      placeholder={t('specs.formCodePlaceholder')}
-                      className={`w-full border rounded px-3 py-2 text-sm focus:outline-none
-                        ${formTypes.some(ft => ft.form_code === newFtCode.trim())
-                          ? 'border-rust focus:border-rust'
-                          : 'border-sand focus:border-terracotta'}`}
-                    />
-                    {formTypes.some(ft => ft.form_code === newFtCode.trim()) && (
-                      <p className="text-[11px] text-rust mt-1">{t('specs.formCodeDuplicate')}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-xs text-charcoal font-medium block mb-1">{t('specs.formNameLabel')}</label>
-                    <input
-                      type="text"
-                      value={newFtName}
-                      onChange={e => setNewFtName(e.target.value)}
-                      placeholder={t('specs.formNamePlaceholder')}
-                      className="w-full border border-sand rounded px-3 py-2 text-sm focus:outline-none focus:border-terracotta"
-                    />
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-warm-gray">
-                  {addFtAnalysis.has_summary
-                    ? t('specs.createFromFileHint')
-                    : t('specs.createNoSummaryHint')}
-                </p>
               </div>
             )}
+
+            {/* Step 2: Review all files + confirm */}
+            {addFtStep === 2 && (() => {
+              const doneItems = addFtItems.filter(it => it.status === 'done' && it.analysis);
+              const allCodes = doneItems.map(it => it.formCode.trim());
+              return (
+                <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                  {doneItems.map((item, idx) => {
+                    const realIdx = addFtItems.indexOf(item);
+                    const isDupExisting = formTypes.some(ft => ft.form_code === item.formCode.trim());
+                    const isDupBatch = item.formCode.trim() !== '' &&
+                      allCodes.filter(c => c === item.formCode.trim()).length > 1;
+                    const hasDup = isDupExisting || isDupBatch;
+                    return (
+                      <div key={realIdx} className="border border-sand/50 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-charcoal truncate" title={item.file.name}>
+                            {item.file.name}
+                          </span>
+                          <div className="flex items-center gap-2 text-xs text-warm-gray shrink-0">
+                            <span>{item.analysis!.total_sheets} sheets</span>
+                            {item.analysis!.has_summary && (
+                              <span className="text-forest">+ {t('specs.hasSummary')}</span>
+                            )}
+                          </div>
+                        </div>
+                        {item.analysis!.matched_form_code && (
+                          <p className="text-[11px] text-rust">
+                            {t('specs.fileMatchesExistingDesc', { code: item.analysis!.matched_form_code })}
+                          </p>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-warm-gray block mb-0.5">{t('specs.formCode')}</label>
+                            <input
+                              type="text"
+                              value={item.formCode}
+                              onChange={e => updateBatchItem(realIdx, 'formCode', e.target.value)}
+                              placeholder={t('specs.formCodePlaceholder')}
+                              className={`w-full border rounded px-2 py-1.5 text-sm focus:outline-none
+                                ${hasDup ? 'border-rust focus:border-rust' : 'border-sand focus:border-terracotta'}`}
+                            />
+                            {isDupExisting && <p className="text-[10px] text-rust mt-0.5">{t('specs.formCodeDuplicate')}</p>}
+                            {isDupBatch && !isDupExisting && <p className="text-[10px] text-rust mt-0.5">{t('specs.formCodeBatchDuplicate')}</p>}
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-warm-gray block mb-0.5">{t('specs.formNameLabel')}</label>
+                            <input
+                              type="text"
+                              value={item.formName}
+                              onChange={e => updateBatchItem(realIdx, 'formName', e.target.value)}
+                              placeholder={t('specs.formNamePlaceholder')}
+                              className="w-full border border-sand rounded px-2 py-1.5 text-sm focus:outline-none focus:border-terracotta"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* Footer buttons */}
             <div className="flex justify-between mt-6">
               <div>
                 {addFtStep === 2 && (
                   <button
-                    onClick={() => { setAddFtStep(1); setAddFtFile(null); setAddFtAnalysis(null); }}
+                    onClick={() => { setAddFtStep(1); }}
                     className="px-4 py-2 text-sm text-warm-gray border border-sand/50 rounded
                                hover:bg-paper hover:shadow-sm active:scale-95 transition-all"
                   >
@@ -868,18 +857,40 @@ export default function SpecManagement() {
                              hover:bg-paper hover:shadow-sm active:scale-95 transition-all">
                   {t('specs.cancel')}
                 </button>
-                {addFtStep === 2 && (
+                {addFtStep === 1 && addFtItems.some(it => it.status === 'done') && !addFtItems.some(it => it.status === 'analyzing') && (
                   <button
-                    onClick={handleCreateFromFile}
-                    disabled={!newFtCode.trim() || !newFtName.trim() || addFtCreating || formTypes.some(ft => ft.form_code === newFtCode.trim())}
+                    onClick={() => setAddFtStep(2)}
                     className="px-4 py-2 text-sm bg-forest text-cream rounded
-                               hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                               hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all"
                   >
-                    {addFtCreating && <div className="w-3.5 h-3.5 border-2 border-cream/30 border-t-cream rounded-full animate-spin" />}
-                    {t('specs.createFormType')}
+                    {t('specs.next')}
                   </button>
                 )}
+                {addFtStep === 2 && (() => {
+                  const doneItems = addFtItems.filter(it => it.status === 'done');
+                  const allCodes = doneItems.map(it => it.formCode.trim());
+                  const hasEmpty = doneItems.some(it => !it.formCode.trim() || !it.formName.trim());
+                  const hasDupExisting = doneItems.some(it => formTypes.some(ft => ft.form_code === it.formCode.trim()));
+                  const hasDupBatch = new Set(allCodes).size !== allCodes.length;
+                  const disabled = hasEmpty || hasDupExisting || hasDupBatch || addFtCreating;
+                  return (
+                    <button
+                      onClick={handleBatchCreate}
+                      disabled={disabled}
+                      className="px-4 py-2 text-sm bg-forest text-cream rounded
+                                 hover:bg-forest/90 hover:shadow-md active:scale-95 transition-all
+                                 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {addFtCreating && (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-cream/30 border-t-cream rounded-full animate-spin" />
+                          <span>{t('specs.createProgress', { done: addFtCreateDone, total: doneItems.length })}</span>
+                        </>
+                      )}
+                      {!addFtCreating && t('specs.createFormType')}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
