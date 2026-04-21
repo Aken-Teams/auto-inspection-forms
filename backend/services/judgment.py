@@ -124,11 +124,21 @@ def judge_sheet_data(db: Session, form_code: str, equipment_id: str, parsed_data
                 "spec": spec_display,
             }
 
+        # Compute row-level judgment and override "judgment" key if present
+        row_judgment = _compute_row_judgment(judged_values)
+        if "judgment" in judged_values:
+            judged_values["judgment"] = {
+                "raw": row_judgment,
+                "judgment": row_judgment if row_judgment != "SKIP" else "SKIP",
+                "spec": "",
+            }
+
         judged_rows.append({
             "date": row_data.get("date", ""),
             "time": row_data.get("time", ""),
             "values": judged_values,
             "extra": row_data.get("extra", {}),
+            "row_judgment": row_judgment,
         })
 
     return {
@@ -228,11 +238,21 @@ def _judge_rd09ab(db: Session, form_type_id: int, equipment_id: str,
                 "spec": spec_display,
             }
 
+        # Compute row-level judgment and override "judgment" key if present
+        row_judgment = _compute_row_judgment(judged_values)
+        if "judgment" in judged_values:
+            judged_values["judgment"] = {
+                "raw": row_judgment,
+                "judgment": row_judgment if row_judgment != "SKIP" else "SKIP",
+                "spec": "",
+            }
+
         judged_rows.append({
             "date": row_data.get("date", ""),
             "time": row_data.get("time", ""),
             "values": judged_values,
             "extra": row_data.get("extra", {}),
+            "row_judgment": row_judgment,
         })
 
     return {
@@ -433,6 +453,20 @@ def _format_spec_display(spec_item: SpecItem) -> str:
     return ""
 
 
+def _compute_row_judgment(judged_values: dict) -> str:
+    """Compute row-level judgment from per-cell judgments.
+
+    Returns 'NG' if any cell is NG, 'OK' if at least one cell is OK,
+    'SKIP' if all cells are SKIP/NO_SPEC.
+    """
+    judgments = [v.get("judgment", "SKIP") for v in judged_values.values() if isinstance(v, dict)]
+    if any(j == "NG" for j in judgments):
+        return "NG"
+    if any(j == "OK" for j in judgments):
+        return "OK"
+    return "SKIP"
+
+
 def _no_spec_result(parsed_data: dict) -> dict:
     """Return a NO_SPEC result with raw data preserved."""
     judged_rows = []
@@ -449,6 +483,7 @@ def _no_spec_result(parsed_data: dict) -> dict:
             "time": row_data.get("time", ""),
             "values": judged_values,
             "extra": row_data.get("extra", {}),
+            "row_judgment": "NO_SPEC",
         })
 
     return {

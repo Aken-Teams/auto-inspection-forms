@@ -253,7 +253,8 @@
     "spec": "Spec",
     "rowResult": "Result",
     "noSpecWarning": "No spec configured for this sheet. Showing raw data.",
-    "noData": "No data"
+    "noData": "No data",
+    "judgment": "Judgment"
   },
   "status": {
     "OK": "OK",

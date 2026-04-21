@@ -141,9 +141,8 @@ def export_batch_results(db: Session, upload_ids: list[int]) -> io.BytesIO:
 def _annotate_sheet(ws, judged_data: dict):
     """Annotate an original worksheet with judgment results.
 
-    1. Clear existing judgment column values
-    2. Write OK/NG into judgment column (if exists)
-    3. Apply color fills to value cells based on judgment
+    1. Only color NG cells red (no green for OK — keeps the sheet clean)
+    2. Always write OK/NG into a judgment column (create one if needed)
     """
     judged_rows = judged_data.get("judged_rows", [])
     has_spec = judged_data.get("has_spec", False)
@@ -161,53 +160,80 @@ def _annotate_sheet(ws, judged_data: dict):
 
     if len(row_map) != len(judged_rows):
         logger.warning(f"_annotate_sheet: row count mismatch - row_map={len(row_map)}, judged_rows={len(judged_rows)}, annotating min overlap")
-        # Annotate as many rows as we can instead of giving up entirely
+
+    # If no judgment column exists, create one after ALL existing columns
+    if not judgment_col and row_map:
+        # Use ws.max_column to avoid overwriting existing columns like 点检人员, 领班确认
+        sheet_max_col = ws.max_column or 1
+        judgment_col = sheet_max_col + 1
+            # Write header for the new judgment column
+            first_data_row = row_map[0].get("row", 1)
+            header_row = max(1, first_data_row - 1)
+            try:
+                hcell = ws.cell(row=header_row, column=judgment_col)
+                hcell.value = "判定"
+                hcell.font = Font(bold=True)
+            except AttributeError:
+                # Cell is part of a merged range — skip header text
+                pass
+            logger.info(f"_annotate_sheet: created judgment column at col={judgment_col}, header at row={header_row}")
 
     # Step 1: Clear judgment column if it exists
     if judgment_col:
         for rm in row_map:
             excel_row = rm.get("row")
             if excel_row:
-                cell = ws.cell(row=excel_row, column=judgment_col)
-                cell.value = None
-                cell.fill = PatternFill()  # Clear fill
+                try:
+                    cell = ws.cell(row=excel_row, column=judgment_col)
+                    cell.value = None
+                    cell.fill = PatternFill()  # Clear fill
+                except AttributeError:
+                    pass  # Merged cell
 
-    # Step 2: Write judgments and apply color fills
+    # Step 2: Apply NG color fills and write row judgments
     for i, jr in enumerate(judged_rows):
         if i >= len(row_map):
             break
 
         rm = row_map[i]
         cells_map = rm.get("cells", {})
-        row_has_ng = False
+        row_judgment = jr.get("row_judgment", "SKIP")
 
-        # Apply color fills to individual value cells
-        for key, val_data in jr.get("values", {}).items():
-            if not isinstance(val_data, dict):
-                continue
+        # Only color NG cells red — do NOT color OK cells green
+        if has_spec:
+            for key, val_data in jr.get("values", {}).items():
+                if not isinstance(val_data, dict):
+                    continue
 
-            judgment = val_data.get("judgment", "SKIP")
-            cell_pos = cells_map.get(key)
+                judgment = val_data.get("judgment", "SKIP")
+                cell_pos = cells_map.get(key)
 
-            if not cell_pos or not has_spec:
-                continue
+                if not cell_pos:
+                    continue
 
-            excel_row, excel_col = cell_pos
+                excel_row, excel_col = cell_pos
 
-            if judgment == "OK":
-                cell = ws.cell(row=excel_row, column=excel_col)
-                cell.fill = FILL_OK
-            elif judgment == "NG":
-                cell = ws.cell(row=excel_row, column=excel_col)
-                cell.fill = FILL_NG
-                cell.font = FONT_NG
-                row_has_ng = True
+                if judgment == "NG":
+                    try:
+                        cell = ws.cell(row=excel_row, column=excel_col)
+                        cell.fill = FILL_NG
+                        cell.font = FONT_NG
+                    except AttributeError:
+                        pass  # Merged cell
 
         # Write row judgment into judgment column
         if judgment_col and has_spec:
             excel_row = rm.get("row")
-            if excel_row:
-                judge_cell = ws.cell(row=excel_row, column=judgment_col)
-                judge_cell.value = "NG" if row_has_ng else "OK"
-                judge_cell.fill = FILL_NG if row_has_ng else FILL_OK
-                judge_cell.font = FONT_NG if row_has_ng else FONT_OK
+            if excel_row and row_judgment != "SKIP":
+                try:
+                    judge_cell = ws.cell(row=excel_row, column=judgment_col)
+                    judge_cell.value = row_judgment
+                    if row_judgment == "NG":
+                        judge_cell.fill = FILL_NG
+                        judge_cell.font = FONT_NG
+                    else:
+                        judge_cell.font = FONT_OK
+                except AttributeError:
+                    pass  # Merged cell
+                else:
+                    judge_cell.font = FONT_OK

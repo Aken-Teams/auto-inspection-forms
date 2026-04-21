@@ -29,11 +29,25 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
     wb = load_workbook(filepath, data_only=True)
 
     try:
+        # Run file validation separately so it can't crash the whole preview
+        try:
+            file_validation = _validate_file(db, wb, filepath, original_filename, form_code, file_hash)
+        except Exception as e:
+            logger.error(f"File validation failed: {e}", exc_info=True)
+            file_validation = {
+                "matches_form_type": None,
+                "detected_form_code": None,
+                "is_duplicate": False,
+                "duplicate_info": None,
+                "fingerprint_similarity": None,
+                "warnings": [f"檔案驗證時發生錯誤: {str(e)}"],
+            }
+
         result = {
             "form_code": form_code,
             "file_hash": file_hash,
             "original_filename": original_filename,
-            "file_validation": _validate_file(db, wb, filepath, original_filename, form_code, file_hash),
+            "file_validation": file_validation,
             "structure_validation": {"valid": True, "warnings": []},
             "parsed_specs": [],
             "parse_method": None,
@@ -42,95 +56,7 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
 
         # Check if 汇总 sheet exists
         if "汇总" not in wb.sheetnames:
-            # Fallback: extract specs from data sheet headers
-            from services.header_spec_extractor import extract_specs_from_headers
-
-            form_type = db.query(FormType).filter(
-                FormType.form_code == form_code
-            ).first()
-            if not form_type:
-                result["structure_validation"] = {
-                    "valid": False,
-                    "warnings": [f"Form type {form_code} not found"],
-                }
-                return result
-
-            header_specs = extract_specs_from_headers(
-                wb, form_code, form_type.form_name
-            )
-            # Determine which method succeeded and the parsed specs
-            parsed_specs = None
-            parse_method = None
-            parse_warning = None
-
-            if header_specs and any(eq.get("items") for eq in header_specs):
-                parsed_specs = header_specs
-                parse_method = "header"
-                parse_warning = "此檔案無匯總 sheet，已從資料表頭自動提取檢查項目"
-            else:
-                # 3rd fallback: AI analysis of data sheet
-                from services.ai_spec_parser import ai_parse_data_sheet
-                data_sheets = [s for s in wb.sheetnames if s != "汇总"]
-                if data_sheets:
-                    ai_result = ai_parse_data_sheet(
-                        wb[data_sheets[0]], form_code, form_type.form_name
-                    )
-                    if ai_result:
-                        ai_specs = []
-                        for eq in ai_result.get("equipment_specs", []):
-                            items = []
-                            for i, item in enumerate(eq.get("items", [])):
-                                items.append({
-                                    "item_name": item.get("item_name", f"item_{i}"),
-                                    "spec_value": str(item.get("spec_value", "")),
-                                    "parsed_spec": item.get("parsed_spec", {}),
-                                    "group_name": item.get("group_name"),
-                                    "sub_group": item.get("sub_group"),
-                                    "display_order": item.get("display_order", i),
-                                })
-                            ai_specs.append({
-                                "equipment_id": eq.get("equipment_id", "UNIVERSAL"),
-                                "equipment_name": eq.get("equipment_name", "UNIVERSAL"),
-                                "items": items,
-                            })
-                        if ai_specs and any(eq.get("items") for eq in ai_specs):
-                            parsed_specs = ai_specs
-                            parse_method = "ai"
-                            result["ai_confidence"] = ai_result.get("confidence")
-                            parse_warning = "此檔案無匯總 sheet，已透過 AI 分析資料表提取檢查項目"
-
-            if parsed_specs:
-                result["structure_validation"] = {
-                    "valid": True,
-                    "warnings": [parse_warning],
-                }
-                result["parse_method"] = parse_method
-                result["parsed_specs"] = _compute_diffs(db, form_type, parsed_specs)
-
-                from services.spec_file_service import check_specs_identical
-                content_identical = check_specs_identical(
-                    db, form_code, parsed_specs
-                )
-                result["content_identical"] = content_identical
-                if content_identical:
-                    result["file_validation"]["warnings"].append(
-                        "此檔案的規格內容與現有資料完全相同，無需重複匯入"
-                    )
-                result["is_blocked"] = (
-                    not result["structure_validation"]["valid"]
-                    or len(result["parsed_specs"]) == 0
-                    or result["file_validation"]["is_duplicate"]
-                    or content_identical
-                )
-                return result
-            else:
-                result["structure_validation"] = {
-                    "valid": False,
-                    "warnings": [
-                        "此檔案無匯總 sheet，規則提取與 AI 分析均無法提取檢查項目"
-                    ],
-                }
-                return result
+            return _preview_no_summary(db, wb, form_code, result)
 
         ws = wb["汇总"]
 
@@ -180,6 +106,113 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
         return result
     finally:
         wb.close()
+
+
+def _preview_no_summary(db: Session, wb, form_code: str, result: dict) -> dict:
+    """Handle preview for files without 汇总 sheet.
+
+    Tries header extraction first, then AI fallback.
+    Returns the result dict with all fields populated.
+    """
+    try:
+        from services.header_spec_extractor import extract_specs_from_headers
+
+        form_type = db.query(FormType).filter(
+            FormType.form_code == form_code
+        ).first()
+        if not form_type:
+            result["structure_validation"] = {
+                "valid": False,
+                "warnings": [f"Form type {form_code} not found"],
+            }
+            return result
+
+        header_specs = extract_specs_from_headers(
+            wb, form_code, form_type.form_name
+        )
+        parsed_specs = None
+        parse_method = None
+        parse_warning = None
+
+        if header_specs and any(eq.get("items") for eq in header_specs):
+            parsed_specs = header_specs
+            parse_method = "header"
+            parse_warning = "此檔案無匯總 sheet，已從資料表頭自動提取檢查項目"
+        else:
+            # AI fallback
+            try:
+                from services.ai_spec_parser import ai_parse_data_sheet
+                data_sheets = [s for s in wb.sheetnames if s != "汇总"]
+                if data_sheets:
+                    ai_result = ai_parse_data_sheet(
+                        wb[data_sheets[0]], form_code, form_type.form_name
+                    )
+                    if ai_result:
+                        ai_specs = []
+                        for eq in ai_result.get("equipment_specs", []):
+                            items = []
+                            for i, item in enumerate(eq.get("items", [])):
+                                items.append({
+                                    "item_name": item.get("item_name", f"item_{i}"),
+                                    "spec_value": str(item.get("spec_value", "")),
+                                    "parsed_spec": item.get("parsed_spec", {}),
+                                    "group_name": item.get("group_name"),
+                                    "sub_group": item.get("sub_group"),
+                                    "display_order": item.get("display_order", i),
+                                })
+                            ai_specs.append({
+                                "equipment_id": eq.get("equipment_id", "UNIVERSAL"),
+                                "equipment_name": eq.get("equipment_name", "UNIVERSAL"),
+                                "items": items,
+                            })
+                        if ai_specs and any(eq.get("items") for eq in ai_specs):
+                            parsed_specs = ai_specs
+                            parse_method = "ai"
+                            result["ai_confidence"] = ai_result.get("confidence")
+                            parse_warning = "此檔案無匯總 sheet，已透過 AI 分析資料表提取檢查項目"
+            except Exception as e:
+                logger.error(f"AI fallback failed for {form_code}: {e}", exc_info=True)
+
+        if parsed_specs:
+            result["structure_validation"] = {
+                "valid": True,
+                "warnings": [parse_warning],
+            }
+            result["parse_method"] = parse_method
+            result["parsed_specs"] = _compute_diffs(db, form_type, parsed_specs)
+
+            from services.spec_file_service import check_specs_identical
+            content_identical = check_specs_identical(
+                db, form_code, parsed_specs
+            )
+            result["content_identical"] = content_identical
+            if content_identical:
+                result["file_validation"]["warnings"].append(
+                    "此檔案的規格內容與現有資料完全相同，無需重複匯入"
+                )
+            result["is_blocked"] = (
+                not result["structure_validation"]["valid"]
+                or len(result["parsed_specs"]) == 0
+                or result["file_validation"]["is_duplicate"]
+                or content_identical
+            )
+            return result
+        else:
+            result["structure_validation"] = {
+                "valid": False,
+                "warnings": [
+                    "此檔案無匯總 sheet，規則提取與 AI 分析均無法提取檢查項目"
+                ],
+            }
+            return result
+
+    except Exception as e:
+        logger.error(f"Preview no-summary failed for {form_code}: {e}", exc_info=True)
+        result["structure_validation"] = {
+            "valid": False,
+            "warnings": [f"預覽處理時發生錯誤: {str(e)}"],
+        }
+        return result
 
 
 def _validate_file(db: Session, wb, filepath: str, original_filename: str,
@@ -498,6 +531,13 @@ def _preview_ai(ws, form_type) -> tuple[list[dict] | None, float | None]:
     return specs, result.get("confidence")
 
 
+def _to_float(val):
+    """Convert Decimal or other numeric to float, or None."""
+    if val is None:
+        return None
+    return float(val)
+
+
 def _compute_diffs(db: Session, form_type, parsed_specs: list[dict]) -> list[dict]:
     """For each equipment, compute diff between existing and new specs."""
     result = []
@@ -516,10 +556,10 @@ def _compute_diffs(db: Session, form_type, parsed_specs: list[dict]) -> list[dic
             new_items.append({
                 "item_name": item["item_name"],
                 "spec_type": parsed.get("spec_type", "text"),
-                "min_value": parsed.get("min_value"),
-                "max_value": parsed.get("max_value"),
+                "min_value": _to_float(parsed.get("min_value")),
+                "max_value": _to_float(parsed.get("max_value")),
                 "expected_text": parsed.get("expected_text"),
-                "threshold_value": parsed.get("threshold_value"),
+                "threshold_value": _to_float(parsed.get("threshold_value")),
                 "threshold_operator": parsed.get("threshold_operator"),
                 "group_name": item.get("group_name"),
                 "sub_group": item.get("sub_group"),

@@ -8,12 +8,20 @@ interface Props {
   hasSpec: boolean;
 }
 
+// Only NG cells get colored — OK cells stay clean
 const JUDGMENT_CELL_STYLES: Record<string, string> = {
-  OK: 'bg-sage/15 text-forest',
+  OK: '',
   NG: 'bg-rose/20 text-rust font-semibold',
   SKIP: '',
   NO_SPEC: 'bg-gold/8',
   ERROR: 'bg-rose/10 text-rust',
+};
+
+const ROW_JUDGMENT_STYLES: Record<string, string> = {
+  OK: 'text-forest font-semibold',
+  NG: 'bg-rose/20 text-rust font-semibold',
+  SKIP: 'text-warm-gray',
+  NO_SPEC: 'text-warm-gray',
 };
 
 // Extra fields from parsers - leading appear before date, trailing after values
@@ -31,6 +39,12 @@ const TRAILING_EXTRAS = ['inspector', 'supervisor', 'signer'];
 export default function InspectionTable({ headers, rows, hasSpec }: Props) {
   const { t } = useTranslation();
 
+  // Filter out "judgment" from data headers — we render our own judgment column
+  const dataHeaders = useMemo(() =>
+    headers.filter(h => h.key !== 'judgment'),
+    [headers]
+  );
+
   // Detect which extra fields have data
   const { leadingExtras, trailingExtras } = useMemo(() => {
     const leading: string[] = [];
@@ -46,11 +60,11 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
     return { leadingExtras: leading, trailingExtras: trailing };
   }, [rows]);
 
-  // Group headers
+  // Group headers (excluding judgment)
   const groups: { group: string; keys: { key: string; label: string }[] }[] = [];
   const groupMap = new Map<string, { key: string; label: string }[]>();
 
-  for (const h of headers) {
+  for (const h of dataHeaders) {
     if (!groupMap.has(h.group)) {
       groupMap.set(h.group, []);
       groups.push({ group: h.group, keys: groupMap.get(h.group)! });
@@ -58,8 +72,10 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
     groupMap.get(h.group)!.push({ key: h.key, label: h.label });
   }
 
-  const allKeys = headers.map(h => h.key);
-  const totalCols = leadingExtras.length + 2 + allKeys.length + trailingExtras.length;
+  const allKeys = dataHeaders.map(h => h.key);
+  // +1 for the judgment column we always add
+  const showJudgment = hasSpec;
+  const totalCols = leadingExtras.length + 2 + allKeys.length + (showJudgment ? 1 : 0) + trailingExtras.length;
 
   return (
     <div className="overflow-x-auto border border-sand/60 rounded-lg bg-white shadow-sm">
@@ -89,6 +105,10 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
                 {g.group}
               </th>
             ))}
+            {showJudgment && (
+              <th className="px-3 py-2 text-center font-medium text-xs tracking-wider border-r border-charcoal/70"
+                  rowSpan={2}>{t('table.judgment')}</th>
+            )}
             {trailingExtras.map(key => (
               <th key={key}
                   className="px-3 py-2 text-left font-medium text-xs tracking-wider border-r border-charcoal/70"
@@ -96,7 +116,7 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
             ))}
           </tr>
           <tr className="bg-ink/90 text-cream/80">
-            {headers.map(h => (
+            {dataHeaders.map(h => (
               <th key={h.key}
                   className="px-2 py-1.5 text-center font-normal text-[11px] tracking-wide border-r border-ink/60 whitespace-nowrap">
                 {h.label}
@@ -118,6 +138,9 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
                   </td>
                 );
               })}
+              {showJudgment && (
+                <td className="border-r border-sand/40" />
+              )}
               {trailingExtras.length > 0 && (
                 <td colSpan={trailingExtras.length} className="border-r border-sand/40" />
               )}
@@ -126,40 +149,50 @@ export default function InspectionTable({ headers, rows, hasSpec }: Props) {
         </thead>
 
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className={`border-b border-sand/30 ${i % 2 === 0 ? 'bg-white' : 'bg-cream/40'} hover:bg-paper/60 transition-colors`}>
-              {leadingExtras.map(key => (
-                <td key={key} className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
-                  {row.extra?.[key] != null ? String(row.extra[key]) : ''}
-                </td>
-              ))}
-              <td className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
-                {row.date}
-              </td>
-              <td className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
-                {row.time}
-              </td>
-              {allKeys.map(key => {
-                const val = row.values?.[key];
-                const raw = val?.raw;
-                const judgment = val?.judgment || 'SKIP';
-                const cellStyle = JUDGMENT_CELL_STYLES[judgment] || '';
+          {rows.map((row, i) => {
+            const rowJudgment = row.row_judgment || 'SKIP';
+            const judgmentStyle = ROW_JUDGMENT_STYLES[rowJudgment] || '';
 
-                return (
-                  <td key={key}
-                      className={`px-2 py-1.5 text-center text-xs border-r border-sand/30 whitespace-nowrap ${cellStyle}`}
-                      title={val?.spec ? `${t('table.spec')}: ${val.spec}` : undefined}>
-                    {raw !== null && raw !== undefined ? String(raw) : ''}
+            return (
+              <tr key={i} className={`border-b border-sand/30 ${i % 2 === 0 ? 'bg-white' : 'bg-cream/40'} hover:bg-paper/60 transition-colors`}>
+                {leadingExtras.map(key => (
+                  <td key={key} className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
+                    {row.extra?.[key] != null ? String(row.extra[key]) : ''}
                   </td>
-                );
-              })}
-              {trailingExtras.map(key => (
-                <td key={key} className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
-                  {row.extra?.[key] != null ? String(row.extra[key]) : ''}
+                ))}
+                <td className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
+                  {row.date}
                 </td>
-              ))}
-            </tr>
-          ))}
+                <td className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
+                  {row.time}
+                </td>
+                {allKeys.map(key => {
+                  const val = row.values?.[key];
+                  const raw = val?.raw;
+                  const judgment = val?.judgment || 'SKIP';
+                  const cellStyle = JUDGMENT_CELL_STYLES[judgment] || '';
+
+                  return (
+                    <td key={key}
+                        className={`px-2 py-1.5 text-center text-xs border-r border-sand/30 whitespace-nowrap ${cellStyle}`}
+                        title={val?.spec ? `${t('table.spec')}: ${val.spec}` : undefined}>
+                      {raw !== null && raw !== undefined ? String(raw) : ''}
+                    </td>
+                  );
+                })}
+                {showJudgment && (
+                  <td className={`px-2 py-1.5 text-center text-xs border-r border-sand/30 whitespace-nowrap ${judgmentStyle}`}>
+                    {rowJudgment !== 'SKIP' ? rowJudgment : ''}
+                  </td>
+                )}
+                {trailingExtras.map(key => (
+                  <td key={key} className="px-3 py-1.5 text-xs text-charcoal whitespace-nowrap border-r border-sand/30">
+                    {row.extra?.[key] != null ? String(row.extra[key]) : ''}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
 
           {rows.length === 0 && (
             <tr>

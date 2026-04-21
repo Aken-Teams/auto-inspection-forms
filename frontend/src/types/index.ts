@@ -79,6 +79,7 @@ export interface JudgedRow {
   time: string;
   values: Record<string, JudgedValue>;
   extra: Record<string, unknown>;
+  row_judgment?: 'OK' | 'NG' | 'SKIP' | 'NO_SPEC';
 }
 
 export interface JudgedValue {

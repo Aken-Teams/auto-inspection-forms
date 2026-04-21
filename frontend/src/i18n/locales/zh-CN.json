@@ -253,7 +253,8 @@
     "spec": "规格",
     "rowResult": "行判定",
     "noSpecWarning": "此工作表尚未建立规格，显示原始数据",
-    "noData": "暂无数据"
+    "noData": "暂无数据",
+    "judgment": "判定"
   },
   "status": {
     "OK": "合格",

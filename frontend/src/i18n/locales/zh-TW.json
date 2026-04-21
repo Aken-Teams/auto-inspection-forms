@@ -253,7 +253,8 @@
     "spec": "規格",
     "rowResult": "行判定",
     "noSpecWarning": "此工作表尚未建立規格，顯示原始資料",
-    "noData": "暫無資料"
+    "noData": "暫無資料",
+    "judgment": "判定"
   },
   "status": {
     "OK": "合格",
