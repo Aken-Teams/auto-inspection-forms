@@ -6,7 +6,8 @@ import os
 import zipfile
 from copy import copy
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 from models import InspectionResult, UploadRecord
 from config import UPLOAD_DIR
@@ -18,6 +19,13 @@ FILL_OK = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid
 FILL_NG = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 FONT_NG = Font(color="FF0000", bold=True)
 FONT_OK = Font(bold=True)
+THIN_BORDER = Border(
+    left=Side(style="thin"),
+    right=Side(style="thin"),
+    top=Side(style="thin"),
+    bottom=Side(style="thin"),
+)
+CENTER_ALIGN = Alignment(horizontal="center", vertical="center")
 
 
 def _get_judged_data_for_export(db: Session, result: InspectionResult, form_code: str | None) -> dict:
@@ -186,60 +194,51 @@ def _annotate_sheet(ws, judged_data: dict):
 
     # Step 2: Prepare judgment column
     if not judgment_col and row_map:
-        # Find actual rightmost column with content in the data area.
-        # Using row_map cells (parser-tracked columns) + scanning nearby
-        # columns for non-tracked content (签名, 备注, etc.)
-        data_rows = [rm.get("row") for rm in row_map if rm.get("row")]
-        first_data_row = data_rows[0] if data_rows else 1
-        header_row = max(1, first_data_row - 1)
-
-        max_data_col = 0
+        # Find first data row for header placement
+        all_physical_rows = set()
         for rm in row_map:
+            if rm.get("row"):
+                all_physical_rows.add(rm["row"])
             for cell_pos in rm.get("cells", {}).values():
                 if isinstance(cell_pos, list) and len(cell_pos) >= 2:
-                    max_data_col = max(max_data_col, cell_pos[1])
+                    all_physical_rows.add(cell_pos[0])
+        first_data_row = min(all_physical_rows) if all_physical_rows else 1
 
-        # Also check actual sheet content in the data row range
-        check_rows = [header_row] + data_rows[:5]
-        for r in check_rows:
-            for c in range(max_data_col + 1, min(max_data_col + 20, (ws.max_column or 0) + 1)):
+        # Find rightmost VISIBLE column with content.
+        # Skip hidden columns so judgment isn't placed after a hidden gap.
+        actual_rightmost = 0
+        for r in range(max(1, first_data_row - 5),
+                       min(first_data_row + 10, (ws.max_row or 1) + 1)):
+            for c in range(min(ws.max_column or 1, 200), 0, -1):
+                col_dim = ws.column_dimensions.get(get_column_letter(c))
+                if col_dim and col_dim.hidden:
+                    continue  # Skip hidden columns
                 try:
-                    val = ws.cell(row=r, column=c).value
+                    if ws.cell(row=r, column=c).value is not None:
+                        actual_rightmost = max(actual_rightmost, c)
+                        break
                 except AttributeError:
-                    val = None
-                if val is not None:
-                    max_data_col = max(max_data_col, c)
-
-        candidate = max_data_col + 1
-
-        # Make sure the candidate column is NOT inside any merged range
-        # for the rows we need to write to (header + data rows).
-        target_rows = set([header_row] + data_rows)
-        for _attempt in range(20):
-            blocked = False
-            for mr in ws.merged_cells.ranges:
-                if mr.min_col <= candidate <= mr.max_col:
-                    for r in range(mr.min_row, mr.max_row + 1):
-                        if r in target_rows and (r, candidate) != (mr.min_row, mr.min_col):
-                            blocked = True
-                            break
-                if blocked:
+                    actual_rightmost = max(actual_rightmost, c)
                     break
-            if not blocked:
-                break
-            candidate += 1
 
-        judgment_col = candidate
+        judgment_col = (actual_rightmost if actual_rightmost > 0
+                        else (ws.max_column or 1)) + 1
+        header_label_row = max(1, first_data_row - 1)
 
-        # Write header
+        # Force judgment column to be VISIBLE with a proper width
+        ws.column_dimensions[get_column_letter(judgment_col)].hidden = False
+        ws.column_dimensions[get_column_letter(judgment_col)].width = 10
+
         try:
-            hcell = ws.cell(row=header_row, column=judgment_col)
+            hcell = ws.cell(row=header_label_row, column=judgment_col)
             hcell.value = "判定"
             hcell.font = Font(bold=True)
+            hcell.border = THIN_BORDER
+            hcell.alignment = CENTER_ALIGN
         except AttributeError:
             pass
         logger.info(f"_annotate_sheet: created judgment column at col={judgment_col} "
-                     f"(max_data_col={max_data_col})")
+                     f"(actual_rightmost={actual_rightmost}, header_row={header_label_row})")
     elif judgment_col:
         # Clear existing judgment column
         for rm in row_map:
@@ -253,21 +252,54 @@ def _annotate_sheet(ws, judged_data: dict):
                     pass
 
     # Step 3: Write row judgment values
-    if judgment_col and has_spec:
+    # For multi-row records (e.g. 上模/下模), merge the judgment cell across
+    # all physical rows of that record to match the form's visual style.
+    if judgment_col:
         for i, jr in enumerate(judged_rows):
             if i >= len(row_map):
                 break
-            excel_row = row_map[i].get("row")
             row_judgment = jr.get("row_judgment", "SKIP")
-            if not excel_row or row_judgment == "SKIP":
+
+            # Find ALL physical rows for this record (not just rm["row"])
+            rm = row_map[i]
+            record_rows = set()
+            if rm.get("row"):
+                record_rows.add(rm["row"])
+            for cell_pos in rm.get("cells", {}).values():
+                if isinstance(cell_pos, list) and len(cell_pos) >= 2:
+                    record_rows.add(cell_pos[0])
+            if not record_rows:
                 continue
+
+            min_row = min(record_rows)
+            max_row = max(record_rows)
+
+            # Set borders on ALL rows first (before merge, so they persist)
+            for r in range(min_row, max_row + 1):
+                try:
+                    ws.cell(row=r, column=judgment_col).border = THIN_BORDER
+                except AttributeError:
+                    pass
+
+            # Write value at the top row
+            # SKIP = no spec matched → show "—"; OK/NG = actual judgment
+            display_value = row_judgment if row_judgment in ("OK", "NG") else "—"
             try:
-                judge_cell = ws.cell(row=excel_row, column=judgment_col)
-                judge_cell.value = row_judgment
+                judge_cell = ws.cell(row=min_row, column=judgment_col)
+                judge_cell.value = display_value
+                judge_cell.alignment = CENTER_ALIGN
                 if row_judgment == "NG":
                     judge_cell.fill = FILL_NG
                     judge_cell.font = FONT_NG
-                else:
+                elif row_judgment == "OK":
                     judge_cell.font = FONT_OK
             except AttributeError:
-                pass  # Merged cell
+                pass
+
+            # Merge vertically if record spans multiple rows
+            if max_row > min_row:
+                try:
+                    ws.merge_cells(start_row=min_row, end_row=max_row,
+                                  start_column=judgment_col, end_column=judgment_col)
+                except (ValueError, KeyError):
+                    pass
