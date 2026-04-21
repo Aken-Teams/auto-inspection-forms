@@ -9,11 +9,12 @@ import type { FormSpec, SpecItemData } from '../types';
 function CustomSelect({ value, onChange, options, className = '' }: {
   value: string;
   onChange: (val: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; desc?: string }[];
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const hasDesc = options.some(o => o.desc);
 
   useEffect(() => {
     if (!open) return;
@@ -41,18 +42,20 @@ function CustomSelect({ value, onChange, options, className = '' }: {
         </svg>
       </button>
       {open && (
-        <div className="absolute z-50 top-full mt-1 left-0 w-full bg-white border border-sand rounded shadow-lg py-1 max-h-48 overflow-y-auto">
+        <div className={`absolute z-50 top-full mt-1 left-0 bg-white border border-sand rounded shadow-lg py-1 max-h-60 overflow-y-auto
+          ${hasDesc ? 'w-56' : 'w-full'}`}>
           {options.map(opt => (
             <button
               key={opt.value}
               type="button"
               onClick={() => { onChange(opt.value); setOpen(false); }}
-              className={`w-full text-left px-3 py-1.5 text-sm transition-colors
+              className={`w-full text-left px-3 py-1.5 transition-colors
                 ${opt.value === value
-                  ? 'bg-terracotta/10 text-terracotta font-medium'
+                  ? 'bg-terracotta/10 text-terracotta'
                   : 'text-charcoal hover:bg-sand/30'}`}
             >
-              {opt.label}
+              <span className={`text-sm ${opt.value === value ? 'font-medium' : ''}`}>{opt.label}</span>
+              {opt.desc && <span className="block text-[11px] text-warm-gray leading-tight mt-0.5">{opt.desc}</span>}
             </button>
           ))}
         </div>
@@ -414,13 +417,13 @@ export default function SpecDetail() {
                     value={item.spec_type}
                     onChange={val => updateField(idx, 'spec_type', val)}
                     options={[
-                      { value: 'range', label: t('specDetail.specTypeRange') },
-                      { value: 'check', label: t('specDetail.specTypeCheck') },
-                      { value: 'text', label: t('specDetail.specTypeText') },
-                      { value: 'threshold', label: t('specDetail.specTypeThreshold') },
-                      { value: 'min', label: t('specDetail.specTypeMin') },
-                      { value: 'max', label: t('specDetail.specTypeMax') },
-                      { value: 'exact', label: t('specDetail.specTypeExact') },
+                      { value: 'range', label: t('specDetail.specTypeRange'), desc: t('specDetail.specTypeRangeDesc') },
+                      { value: 'check', label: t('specDetail.specTypeCheck'), desc: t('specDetail.specTypeCheckDesc') },
+                      { value: 'text', label: t('specDetail.specTypeText'), desc: t('specDetail.specTypeTextDesc') },
+                      { value: 'threshold', label: t('specDetail.specTypeThreshold'), desc: t('specDetail.specTypeThresholdDesc') },
+                      { value: 'min', label: t('specDetail.specTypeMin'), desc: t('specDetail.specTypeMinDesc') },
+                      { value: 'max', label: t('specDetail.specTypeMax'), desc: t('specDetail.specTypeMaxDesc') },
+                      { value: 'exact', label: t('specDetail.specTypeExact'), desc: t('specDetail.specTypeExactDesc') },
                     ]}
                   />
                 </div>
