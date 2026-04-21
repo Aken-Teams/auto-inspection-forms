@@ -146,6 +146,20 @@ def export_batch_results(db: Session, upload_ids: list[int]) -> io.BytesIO:
     return zip_buffer
 
 
+def _unmerge_cell(ws, row, col):
+    """Unmerge the merged range containing (row, col) if any.
+
+    This allows writing to cells that are part of a merged range in the original file.
+    Only unmerges the specific range — doesn't affect other merged areas.
+    """
+    for merged_range in list(ws.merged_cells.ranges):
+        if (merged_range.min_row <= row <= merged_range.max_row
+                and merged_range.min_col <= col <= merged_range.max_col):
+            ws.unmerge_cells(str(merged_range))
+            return True
+    return False
+
+
 def _annotate_sheet(ws, judged_data: dict):
     """Annotate an original worksheet with judgment results.
 
@@ -229,6 +243,8 @@ def _annotate_sheet(ws, judged_data: dict):
         ws.column_dimensions[get_column_letter(judgment_col)].hidden = False
         ws.column_dimensions[get_column_letter(judgment_col)].width = 10
 
+        # Write header — unmerge the cell first if it's inside a merged range
+        _unmerge_cell(ws, header_label_row, judgment_col)
         try:
             hcell = ws.cell(row=header_label_row, column=judgment_col)
             hcell.value = "判定"
@@ -236,6 +252,7 @@ def _annotate_sheet(ws, judged_data: dict):
             hcell.border = THIN_BORDER
             hcell.alignment = CENTER_ALIGN
         except AttributeError:
+            # Still merged (shouldn't happen after unmerge, but just in case)
             pass
         logger.info(f"_annotate_sheet: created judgment column at col={judgment_col} "
                      f"(actual_rightmost={actual_rightmost}, header_row={header_label_row})")
@@ -273,6 +290,10 @@ def _annotate_sheet(ws, judged_data: dict):
 
             min_row = min(record_rows)
             max_row = max(record_rows)
+
+            # Unmerge any existing merged ranges in the judgment column area
+            for r in range(min_row, max_row + 1):
+                _unmerge_cell(ws, r, judgment_col)
 
             # Set borders on ALL rows first (before merge, so they persist)
             for r in range(min_row, max_row + 1):
