@@ -24,7 +24,7 @@ def download_sheet(result_id: int, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(404, "Result not found")
 
-    excel_data = export_result_to_excel(result)
+    excel_data = export_result_to_excel(db, result)
     filename = f"{result.sheet_name}_判定结果.xlsx"
 
     return StreamingResponse(

@@ -91,6 +91,7 @@ class RD09AAParser(BaseParser):
                 headers.append({"key": f"disp_temp_{pos}_{i}", "label": f"模温显示值{i}({pos})", "group": "模温"})
 
         rows = []
+        meta_rows = []
         row = data_start
         while row <= ws.max_row:
             date_val = self._cell_val(ws, row, date_col)
@@ -127,8 +128,20 @@ class RD09AAParser(BaseParser):
                     "preheat_temp": self._cell_val(ws, row, preheat_col),
                     f"set_temp_{pos}": set_val,
                 }
+                cells = {
+                    "product_type": [row, product_col],
+                    "mold_no": [row, mold_col],
+                    "clamp_pressure": [row, clamp_col],
+                    "inject_pressure": [row, inject_col],
+                    "cure_time": [row, cure_col],
+                    "inject_time": [row, inject_time_col],
+                    "preheat_temp": [row, preheat_col],
+                }
+                if set_col:
+                    cells[f"set_temp_{pos}"] = [row, set_col]
                 for i, dc in enumerate(disp_cols):
                     values[f"disp_temp_{pos}_{i+1}"] = self._cell_val(ws, row, dc)
+                    cells[f"disp_temp_{pos}_{i+1}"] = [row, dc]
 
                 # Check next row for the other mold position
                 if row + 1 <= ws.max_row:
@@ -137,8 +150,11 @@ class RD09AAParser(BaseParser):
                         next_pos = str(next_div).strip()
                         next_set = self._cell_val(ws, row + 1, set_col) if set_col else None
                         values[f"set_temp_{next_pos}"] = next_set
+                        if set_col:
+                            cells[f"set_temp_{next_pos}"] = [row + 1, set_col]
                         for i, dc in enumerate(disp_cols):
                             values[f"disp_temp_{next_pos}_{i+1}"] = self._cell_val(ws, row + 1, dc)
+                            cells[f"disp_temp_{next_pos}_{i+1}"] = [row + 1, dc]
                         row += 1  # skip next row as we merged it
 
                 signer = self._cell_val(ws, row, ws.max_column - 1)
@@ -148,6 +164,7 @@ class RD09AAParser(BaseParser):
                     "values": values,
                     "extra": {"signer": str(signer) if signer else ""},
                 })
+                meta_rows.append({"row": row, "cells": cells})
 
             row += 1
 
@@ -166,4 +183,5 @@ class RD09AAParser(BaseParser):
             "inspection_date": inspection_date,
             "headers": headers,
             "rows": rows,
+            "meta": {"row_map": meta_rows, "judgment_col": None},
         }

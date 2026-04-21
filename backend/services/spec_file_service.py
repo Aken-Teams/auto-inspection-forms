@@ -71,6 +71,32 @@ def find_duplicate(db: Session, form_code: str, file_hash: str) -> dict | None:
     return None
 
 
+def find_duplicate_across_all(file_hash: str) -> dict | None:
+    """Check if a file with the same hash exists in ANY form type's spec_files folder.
+
+    Scans the filesystem rather than DB, so it catches files even if DB records were deleted.
+    Returns {"form_code": str, "filename": str} if found, None otherwise.
+    """
+    hash_prefix = file_hash[:12]
+    if not os.path.isdir(SPEC_DIR):
+        return None
+
+    for form_code_dir in os.listdir(SPEC_DIR):
+        dir_path = os.path.join(SPEC_DIR, form_code_dir)
+        if not os.path.isdir(dir_path):
+            continue
+        for filename in os.listdir(dir_path):
+            if filename.startswith(hash_prefix):
+                # Extract original filename (remove hash prefix)
+                original = filename[len(hash_prefix) + 1:] if len(filename) > len(hash_prefix) + 1 else filename
+                return {
+                    "form_code": form_code_dir,
+                    "filename": original,
+                    "file_hash": file_hash,
+                }
+    return None
+
+
 def get_absolute_path(stored_path: str) -> str:
     """Get absolute filesystem path for a stored spec file."""
     return os.path.join(SPEC_DIR, stored_path)

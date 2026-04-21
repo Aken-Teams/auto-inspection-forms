@@ -25,6 +25,12 @@ interface SheetInfo {
   sample_keywords: string[];
 }
 
+interface DuplicateSpecFile {
+  form_code: string;
+  filename: string;
+  file_hash: string;
+}
+
 interface AnalysisResult {
   filename: string;
   total_sheets: number;
@@ -35,6 +41,7 @@ interface AnalysisResult {
   suggested_file_pattern: string;
   extracted_form_code: string | null;
   matched_form_code: string | null;
+  duplicate_spec_file: DuplicateSpecFile | null;
 }
 
 export default function SpecManagement() {
@@ -192,7 +199,8 @@ export default function SpecManagement() {
         const res = await analyzeFile(file);
         const analysis = res.data as AnalysisResult;
         const baseName = file.name.replace(/\.[^.]+$/, '');
-        const code = analysis.extracted_form_code || baseName.substring(0, 20);
+        // Prefer matched_form_code (existing type detection) over raw extracted code
+        const code = analysis.matched_form_code || analysis.extracted_form_code || baseName.substring(0, 20);
         setAddFtItems(prev => prev.map((it, j) => j === idx
           ? { ...it, status: 'done', analysis, formCode: code, formName: baseName } : it));
       } catch (err: any) {
@@ -758,7 +766,12 @@ export default function SpecManagement() {
                         )}
                         <span className="flex-1 truncate text-charcoal">{item.file.name}</span>
                         {item.status === 'done' && item.analysis && (
-                          <span className="text-xs text-warm-gray shrink-0">{item.analysis.total_sheets} sheets</span>
+                          <span className="text-xs text-warm-gray shrink-0">
+                            {item.analysis.total_sheets} sheets
+                            {item.analysis.duplicate_spec_file && (
+                              <span className="text-rust ml-1" title={t('specs.fileDuplicateShort')}>⚠</span>
+                            )}
+                          </span>
                         )}
                         {item.status === 'error' && (
                           <span className="text-xs text-rust shrink-0 max-w-[150px] truncate">{item.error}</span>
@@ -784,10 +797,22 @@ export default function SpecManagement() {
                 <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
                   {doneItems.map((item, idx) => {
                     const realIdx = addFtItems.indexOf(item);
-                    const isDupExisting = formTypes.some(ft => ft.form_code === item.formCode.trim());
-                    const isDupBatch = item.formCode.trim() !== '' &&
-                      allCodes.filter(c => c === item.formCode.trim()).length > 1;
-                    const hasDup = isDupExisting || isDupBatch;
+                    const trimmedCode = item.formCode.trim();
+                    const isDupExisting = formTypes.some(ft => ft.form_code === trimmedCode);
+                    // Also check prefix similarity: F-QA10212 should flag F-QA1021
+                    const isSimilarExisting = !isDupExisting && trimmedCode.length > 0 && formTypes.some(ft =>
+                      (trimmedCode.startsWith(ft.form_code) && trimmedCode.length > ft.form_code.length) ||
+                      (ft.form_code.startsWith(trimmedCode) && ft.form_code.length > trimmedCode.length)
+                    );
+                    const similarCode = isSimilarExisting
+                      ? formTypes.find(ft =>
+                          trimmedCode.startsWith(ft.form_code) || ft.form_code.startsWith(trimmedCode)
+                        )?.form_code
+                      : null;
+                    const isDupBatch = trimmedCode !== '' &&
+                      allCodes.filter(c => c === trimmedCode).length > 1;
+                    const isFileDup = !!item.analysis?.duplicate_spec_file;
+                    const hasDup = isDupExisting || isDupBatch || isSimilarExisting || isFileDup;
                     return (
                       <div key={realIdx} className="border border-sand/50 rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
@@ -806,6 +831,14 @@ export default function SpecManagement() {
                             {t('specs.fileMatchesExistingDesc', { code: item.analysis!.matched_form_code })}
                           </p>
                         )}
+                        {isFileDup && (
+                          <p className="text-[11px] text-rust font-medium">
+                            {t('specs.fileDuplicate', {
+                              code: item.analysis!.duplicate_spec_file!.form_code,
+                              filename: item.analysis!.duplicate_spec_file!.filename,
+                            })}
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-[10px] text-warm-gray block mb-0.5">{t('specs.formCode')}</label>
@@ -818,6 +851,7 @@ export default function SpecManagement() {
                                 ${hasDup ? 'border-rust focus:border-rust' : 'border-sand focus:border-terracotta'}`}
                             />
                             {isDupExisting && <p className="text-[10px] text-rust mt-0.5">{t('specs.formCodeDuplicate')}</p>}
+                            {isSimilarExisting && <p className="text-[10px] text-rust mt-0.5">{t('specs.formCodeSimilar', { code: similarCode })}</p>}
                             {isDupBatch && !isDupExisting && <p className="text-[10px] text-rust mt-0.5">{t('specs.formCodeBatchDuplicate')}</p>}
                           </div>
                           <div>
@@ -871,8 +905,17 @@ export default function SpecManagement() {
                   const allCodes = doneItems.map(it => it.formCode.trim());
                   const hasEmpty = doneItems.some(it => !it.formCode.trim() || !it.formName.trim());
                   const hasDupExisting = doneItems.some(it => formTypes.some(ft => ft.form_code === it.formCode.trim()));
+                  const hasSimilarExisting = doneItems.some(it => {
+                    const c = it.formCode.trim();
+                    return c && !formTypes.some(ft => ft.form_code === c) &&
+                      formTypes.some(ft =>
+                        (c.startsWith(ft.form_code) && c.length > ft.form_code.length) ||
+                        (ft.form_code.startsWith(c) && ft.form_code.length > c.length)
+                      );
+                  });
                   const hasDupBatch = new Set(allCodes).size !== allCodes.length;
-                  const disabled = hasEmpty || hasDupExisting || hasDupBatch || addFtCreating;
+                  const hasFileDup = doneItems.some(it => !!it.analysis?.duplicate_spec_file);
+                  const disabled = hasEmpty || hasDupExisting || hasSimilarExisting || hasDupBatch || hasFileDup || addFtCreating;
                   return (
                     <button
                       onClick={handleBatchCreate}

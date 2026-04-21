@@ -108,6 +108,7 @@ class RD09ABParser(BaseParser):
         # Parse data rows
         data_start = sub_sub_row + 1
         rows = []
+        meta_rows = []
         row = data_start
 
         while row <= ws.max_row:
@@ -126,22 +127,33 @@ class RD09ABParser(BaseParser):
             if div_val and str(div_val).strip() in ("上模", "下模"):
                 pos = str(div_val).strip()
                 values = {}
+                cells = {}
 
                 # Basic info (might be from a previous merged row)
                 values["date"] = str(self._cell_val(ws, row, date_col) or "")
                 values["time"] = str(self._cell_val(ws, row, time_col) or "")
                 values["wash_reason"] = self._cell_val(ws, row, reason_col)
+                cells["wash_reason"] = [row, reason_col]
                 values["wash_method"] = self._cell_val(ws, row, method_col)
+                cells["wash_method"] = [row, method_col]
                 values["mold_count"] = self._cell_val(ws, row, mold_count_col)
+                cells["mold_count"] = [row, mold_count_col]
                 values["cure_time"] = self._cell_val(ws, row, cure_time_col)
+                cells["cure_time"] = [row, cure_time_col]
                 values["mold_no"] = self._cell_val(ws, row, mold_no_col)
+                cells["mold_no"] = [row, mold_no_col]
                 values["clamp_pressure"] = self._cell_val(ws, row, clamp_col)
+                cells["clamp_pressure"] = [row, clamp_col]
                 values["inject_pressure"] = self._cell_val(ws, row, inject_col)
+                cells["inject_pressure"] = [row, inject_col]
 
                 # Temperature
                 values[f"set_temp_{pos}"] = self._cell_val(ws, row, set_col) if set_col else None
+                if set_col:
+                    cells[f"set_temp_{pos}"] = [row, set_col]
                 for i, dc in enumerate(disp_cols):
                     values[f"disp_temp_{pos}_{i+1}"] = self._cell_val(ws, row, dc)
+                    cells[f"disp_temp_{pos}_{i+1}"] = [row, dc]
 
                 # Check next row for other mold position
                 if row + 1 <= ws.max_row:
@@ -149,19 +161,25 @@ class RD09ABParser(BaseParser):
                     if next_div and str(next_div).strip() in ("上模", "下模"):
                         next_pos = str(next_div).strip()
                         values[f"set_temp_{next_pos}"] = self._cell_val(ws, row + 1, set_col) if set_col else None
+                        if set_col:
+                            cells[f"set_temp_{next_pos}"] = [row + 1, set_col]
                         for i, dc in enumerate(disp_cols):
                             values[f"disp_temp_{next_pos}_{i+1}"] = self._cell_val(ws, row + 1, dc)
+                            cells[f"disp_temp_{next_pos}_{i+1}"] = [row + 1, dc]
                         row += 1
 
                 # Appearance
                 for i, ac in enumerate(appearance_cols):
                     values[f"appearance_{i+1}"] = self._cell_val(ws, row, ac)
+                    cells[f"appearance_{i+1}"] = [row, ac]
 
                 # Status
                 if mold_status_col:
                     values["mold_status"] = self._cell_val(ws, row, mold_status_col)
+                    cells["mold_status"] = [row, mold_status_col]
                 if pin_status_col:
                     values["pin_status"] = self._cell_val(ws, row, pin_status_col)
+                    cells["pin_status"] = [row, pin_status_col]
 
                 date_str = values.pop("date")
                 time_str = values.pop("time")
@@ -173,6 +191,7 @@ class RD09ABParser(BaseParser):
                     "values": values,
                     "extra": {"signer": str(signer) if signer else ""},
                 })
+                meta_rows.append({"row": row, "cells": cells})
 
             row += 1
 
@@ -181,4 +200,5 @@ class RD09ABParser(BaseParser):
             "inspection_date": inspection_date,
             "headers": headers,
             "rows": rows,
+            "meta": {"row_map": meta_rows, "judgment_col": None},
         }

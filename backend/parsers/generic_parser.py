@@ -40,14 +40,17 @@ class GenericParser(BaseParser):
                 col_headers[col] = key
 
         # Read data rows
+        meta_rows = []
         for row in range(header_row + 1, ws.max_row + 1):
             values = {}
+            cells = {}
             has_data = False
             for col, key in col_headers.items():
                 val = self._cell_val(ws, row, col)
                 if val is not None:
                     has_data = True
                 values[key] = val
+                cells[key] = [row, col]
 
             if has_data:
                 first_val = self._cell_val(ws, row, 1)
@@ -59,10 +62,12 @@ class GenericParser(BaseParser):
                     "values": values,
                     "extra": {},
                 })
+                meta_rows.append({"row": row, "cells": cells})
 
         return {
             "equipment_id": sheet_name,
             "inspection_date": "",
             "headers": headers,
             "rows": rows,
+            "meta": {"row_map": meta_rows, "judgment_col": None},
         }

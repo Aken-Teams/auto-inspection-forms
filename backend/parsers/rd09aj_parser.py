@@ -128,6 +128,7 @@ class RD09AJParser(BaseParser):
         # Parse data rows
         data_start = zone_row + 1
         rows = []
+        meta_rows = []
 
         for row in range(data_start, ws.max_row + 1):
             date_val = self._cell_val(ws, row, date_col)
@@ -139,22 +140,28 @@ class RD09AJParser(BaseParser):
 
             time_val = self._cell_val(ws, row, time_col)
             values = {}
+            cells = {}
 
             # SV temperatures
             for zone_num, col in sv_cols:
                 values[f"sv_{zone_num}"] = self._cell_val(ws, row, col)
+                cells[f"sv_{zone_num}"] = [row, col]
             # PV temperatures
             for zone_num, col in pv_cols:
                 values[f"pv_{zone_num}"] = self._cell_val(ws, row, col)
+                cells[f"pv_{zone_num}"] = [row, col]
             # Gas values
             for gl in gas_labels:
                 values[f"gas_{gl['label']}"] = self._cell_val(ws, row, gl["col"])
+                cells[f"gas_{gl['label']}"] = [row, gl["col"]]
             # Cooling water
             if cooling_col:
                 values["cooling_water"] = self._cell_val(ws, row, cooling_col)
+                cells["cooling_water"] = [row, cooling_col]
             # Judgment
             if judge_col:
                 values["judgment"] = self._cell_val(ws, row, judge_col)
+                cells["judgment"] = [row, judge_col]
 
             signer = self._cell_val(ws, row, sign_col) if sign_col else ""
 
@@ -164,10 +171,12 @@ class RD09AJParser(BaseParser):
                 "values": values,
                 "extra": {"signer": str(signer) if signer else ""},
             })
+            meta_rows.append({"row": row, "cells": cells})
 
         return {
             "equipment_id": equipment_id,
             "inspection_date": inspection_date,
             "headers": headers,
             "rows": rows,
+            "meta": {"row_map": meta_rows, "judgment_col": judge_col},
         }

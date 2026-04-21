@@ -64,6 +64,24 @@ def identify_form_type(filename: str, sheet_names: list, sheet_contents: dict = 
             existing = db.query(FormType).filter(FormType.form_code == extracted_code).first()
             if existing:
                 return extracted_code
+
+        # Check if any known code is a PREFIX of extracted code
+        # e.g., regex captures "F-QA10212" but "F-QA1021" is a known code
+        for known_code in FORM_PATTERNS:
+            if extracted_code.startswith(known_code) and len(extracted_code) > len(known_code):
+                logger.info(f"Corrected form code: {extracted_code} -> {known_code} (prefix match)")
+                return known_code
+        if db:
+            prefix_matches = db.query(FormType.form_code).all()
+            best_match = None
+            for (code,) in prefix_matches:
+                if extracted_code.startswith(code) and len(extracted_code) > len(code):
+                    if best_match is None or len(code) > len(best_match):
+                        best_match = code
+            if best_match:
+                logger.info(f"Corrected form code: {extracted_code} -> {best_match} (DB prefix match)")
+                return best_match
+
         # New form code found in filename - return it (will be auto-created by upload flow)
         return extracted_code
 
@@ -145,7 +163,10 @@ def extract_equipment_id_from_sheet(sheet_name: str, form_code: str) -> str:
         'WPRN-0001' -> 'WPRN-0001'
     """
     if form_code == "F-QA1021":
-        match = re.match(r"(RD-LZ-\d+)", sheet_name)
+        # Non-greedy match to separate equipment ID from year (e.g., RD-LZ-142026年 → RD-LZ-14)
+        match = re.match(r"(RD-LZ-\d+?)(\d{4}年)", sheet_name)
+        if not match:
+            match = re.match(r"(RD-LZ-\d+)", sheet_name)
         return match.group(1) if match else sheet_name
 
     if form_code in ("F-RD09AA", "F-RD09AB"):

@@ -120,6 +120,7 @@ def judge_sheet_data(db: Session, form_code: str, equipment_id: str, parsed_data
             "ng": ng_count,
             "skip": skip_count,
         },
+        "meta": parsed_data.get("meta"),
     }
 
 
@@ -223,6 +224,7 @@ def _judge_rd09ab(db: Session, form_type_id: int, equipment_id: str,
             "ng": ng_count,
             "skip": skip_count,
         },
+        "meta": parsed_data.get("meta"),
     }
 
 
@@ -242,6 +244,13 @@ def _find_matching_spec(db: Session, form_type_id: int, equipment_id: str,
         return db.query(FormSpec).filter(
             FormSpec.form_type_id == form_type_id,
             FormSpec.equipment_id == "RD-LZ-XX",
+        ).first()
+
+    # For F-RD09AA: try wildcard WPRN-XXXX (all machines share same spec)
+    if form_code == "F-RD09AA":
+        return db.query(FormSpec).filter(
+            FormSpec.form_type_id == form_type_id,
+            FormSpec.equipment_id == "WPRN-XXXX",
         ).first()
 
     # For F-RD09AJ: try wildcard WCBA-XXXX
@@ -400,4 +409,5 @@ def _no_spec_result(parsed_data: dict) -> dict:
         "overall_result": "NO_SPEC",
         "judged_rows": judged_rows,
         "summary": {"total": 0, "ok": 0, "ng": 0, "skip": 0},
+        "meta": parsed_data.get("meta"),
     }

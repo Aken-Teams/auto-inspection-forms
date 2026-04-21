@@ -14,6 +14,7 @@ from database import get_db
 from models import FormType, FormSpec, SpecItem, UploadRecord, SpecVersion, InspectionResult
 from config import SPEC_DIR
 from services.spec_service import import_specs_from_excel, init_form_types
+from services.spec_file_service import compute_file_hash, find_duplicate_across_all
 from parsers.identifier import identify_form_type, _FORM_CODE_RE
 from config import UPLOAD_DIR
 
@@ -471,24 +472,40 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
         id_keywords = [kw for kw, count in all_keywords.items()
                        if count >= max(1, sheet_count * 0.5) and 2 <= len(kw) <= 20]
 
-        # Extract form code from filename using regex
-        extracted_form_code = None
-        code_match = _FORM_CODE_RE.search(file.filename)
-        if code_match:
-            extracted_form_code = code_match.group(1).upper()
-
-        # Check if this file matches an existing form type
-        matched_form_code = None
+        # Check if this file matches an existing form type (uses full identification cascade)
         sheet_contents = {}
         for si in sheets_info:
             sheet_contents[si["name"]] = " ".join(si.get("sample_keywords", []))
         matched_form_code = identify_form_type(
             file.filename, sheet_names, sheet_contents, db=db
         )
-        # Only report as matched if it actually exists in DB
+
+        # Extract form code from filename using regex (raw extraction)
+        extracted_form_code = None
+        code_match = _FORM_CODE_RE.search(file.filename)
+        if code_match:
+            extracted_form_code = code_match.group(1).upper()
+
+        # If identify_form_type corrected the code (e.g., F-QA10212 -> F-QA1021),
+        # also update extracted_form_code to the corrected version
+        if matched_form_code and extracted_form_code:
+            if extracted_form_code != matched_form_code and extracted_form_code.startswith(matched_form_code):
+                extracted_form_code = matched_form_code
+
+        # Check for file content duplicate across all spec_files
+        file_hash = compute_file_hash(content)
+        duplicate_spec_file = find_duplicate_across_all(file_hash)
+
+        # Only report matched_form_code if it actually exists in DB
         if matched_form_code:
             existing = db.query(FormType).filter(FormType.form_code == matched_form_code).first()
-            if not existing:
+            if existing:
+                # File matches an existing form type - flag it
+                pass
+            else:
+                # The code was identified but not yet in DB - use it as extracted
+                if not extracted_form_code:
+                    extracted_form_code = matched_form_code
                 matched_form_code = None
 
         return {
@@ -501,6 +518,7 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
             "suggested_file_pattern": os.path.splitext(file.filename)[0],
             "extracted_form_code": extracted_form_code,
             "matched_form_code": matched_form_code,
+            "duplicate_spec_file": duplicate_spec_file,
         }
 
     finally:
@@ -519,11 +537,12 @@ async def create_from_file(
 
     Automatically creates:
     1. A FormType with file_pattern derived from filename
-    2. A FormSpec for each data sheet (equipment)
-    Note: Spec items are NOT auto-created from raw data headers.
-    Users should import specs from a file with 汇总 sheet or set up manually.
+    2. A FormSpec for each data sheet (with properly extracted equipment IDs)
+    3. If file has 汇总 sheet, auto-imports spec items from it
     """
-    # Check duplicate
+    from parsers.identifier import extract_equipment_id_from_sheet
+
+    # Check duplicate form code
     existing = db.query(FormType).filter(FormType.form_code == form_code).first()
     if existing:
         raise HTTPException(409, f"Form type {form_code} already exists")
@@ -532,6 +551,15 @@ async def create_from_file(
     filepath = os.path.join(UPLOAD_DIR, f"sample_{uuid.uuid4().hex}_{file.filename}")
 
     content = await file.read()
+
+    # Check for file content duplicate across all spec_files
+    file_hash_full = compute_file_hash(content)
+    dup = find_duplicate_across_all(file_hash_full)
+    if dup:
+        raise HTTPException(
+            409,
+            f"此檔案內容與已存在的「{dup['form_code']}」中的「{dup['filename']}」完全相同，請勿重複上傳"
+        )
     with open(filepath, "wb") as f:
         f.write(content)
 
@@ -554,34 +582,55 @@ async def create_from_file(
         db.flush()
 
         specs_created = 0
-
-        # Create spec groups (one per data sheet) - no items yet
-        for sn in data_sheets:
-            spec = FormSpec(
-                form_type_id=ft.id,
-                equipment_id=sn,
-                equipment_name=sn,
-            )
-            db.add(spec)
-            specs_created += 1
-
-        wb.close()
-        db.commit()
+        items_imported = 0
 
         # Store file permanently in spec_files/
+        import hashlib
         spec_dir = os.path.join(SPEC_DIR, form_code)
         os.makedirs(spec_dir, exist_ok=True)
-        import hashlib
         file_hash = hashlib.sha256(content).hexdigest()[:12]
         stored_name = f"{file_hash}_{file.filename}"
         stored_path = os.path.join(spec_dir, stored_name)
         with open(stored_path, "wb") as sf:
             sf.write(content)
 
+        # If file has 汇总 sheet, auto-import specs from it (creates proper spec groups + items)
+        if has_summary:
+            import_result = import_specs_from_excel(
+                db, filepath, form_code,
+                source_filename=file.filename,
+                stored_filepath=stored_path,
+                file_hash=file_hash,
+            )
+            if import_result.get("success"):
+                # Count what was created by the import
+                specs_created = db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
+                items_imported = db.query(SpecItem).join(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
+
+        # For sheets not covered by 汇总 import, create empty spec groups
+        existing_equipment_ids = set(
+            s.equipment_id for s in db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).all()
+        )
+        for sn in data_sheets:
+            equipment_id = extract_equipment_id_from_sheet(sn, form_code)
+            if equipment_id not in existing_equipment_ids:
+                spec = FormSpec(
+                    form_type_id=ft.id,
+                    equipment_id=equipment_id,
+                    equipment_name=sn,
+                )
+                db.add(spec)
+                existing_equipment_ids.add(equipment_id)
+                specs_created += 1
+
+        wb.close()
+        db.commit()
+
         return {
             "success": True,
             "form_code": form_code,
             "specs_created": specs_created,
+            "items_imported": items_imported,
             "has_summary": has_summary,
         }
 

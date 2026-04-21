@@ -21,7 +21,10 @@ class QA1021Parser(BaseParser):
     ]
 
     def _parse_impl(self, ws, sheet_name):
-        equipment_match = re.match(r"(RD-LZ-\d+)", sheet_name)
+        # Non-greedy match to separate equipment ID from year (e.g., RD-LZ-142026年 → RD-LZ-14)
+        equipment_match = re.match(r"(RD-LZ-\d+?)(\d{4}年)", sheet_name)
+        if not equipment_match:
+            equipment_match = re.match(r"(RD-LZ-\d+)", sheet_name)
         equipment_id = equipment_match.group(1) if equipment_match else sheet_name
 
         # Find header row (look for "设备编号")
@@ -53,10 +56,11 @@ class QA1021Parser(BaseParser):
             if label in col_map:
                 check_cols[label] = col_map[label]
 
-        # Find equipment, date, inspector columns
+        # Find equipment, date, inspector, supervisor columns
         equip_col = col_map.get("设备编号") or 1
         date_col = col_map.get("日期") or 3
         inspector_col = col_map.get("点检人员")
+        supervisor_col = col_map.get("领班确认")
 
         # Determine the date range from sheet name
         date_match = re.search(r"(\d{4})年(\d{2})月", sheet_name)
@@ -65,6 +69,7 @@ class QA1021Parser(BaseParser):
         headers = [{"key": label, "label": label, "group": "点检项目"} for label in check_cols.keys()]
 
         rows = []
+        meta_rows = []
         for row in range(data_start_row, ws.max_row + 1):
             equip_val = self._cell_val(ws, row, equip_col if isinstance(equip_col, int) else 1)
             date_val = self._cell_val(ws, row, date_col if isinstance(date_col, int) else 3)
@@ -76,8 +81,10 @@ class QA1021Parser(BaseParser):
                 break
 
             values = {}
+            cells = {}
             for label, col in check_cols.items():
                 values[label] = self._cell_val(ws, row, col)
+                cells[label] = [row, col]
 
             rows.append({
                 "date": str(date_val) if date_val else "",
@@ -85,13 +92,16 @@ class QA1021Parser(BaseParser):
                 "values": values,
                 "extra": {
                     "equipment_id": str(equip_val) if equip_val else "",
-                    "inspector": str(self._cell_val(ws, row, inspector_col)) if inspector_col else "",
+                    "inspector": str(self._cell_val(ws, row, inspector_col) or "") if inspector_col else "",
+                    "supervisor": str(self._cell_val(ws, row, supervisor_col) or "") if supervisor_col else "",
                 },
             })
+            meta_rows.append({"row": row, "cells": cells})
 
         return {
             "equipment_id": equipment_id,
             "inspection_date": inspection_date,
             "headers": headers,
             "rows": rows,
+            "meta": {"row_map": meta_rows, "judgment_col": None},
         }

@@ -81,6 +81,7 @@ class RD09AKParser(BaseParser):
         # Parse data rows
         data_start = num_row + 1
         rows = []
+        meta_rows = []
         parts = ["A", "G1", "G2", "G3", "G4"]
 
         row = data_start
@@ -102,15 +103,22 @@ class RD09AKParser(BaseParser):
                 continue
 
             values = {}
+            cells = {}
             values["product_no"] = self._cell_val(ws, row, product_col)
+            cells["product_no"] = [row, product_col]
             values["lot_no"] = self._cell_val(ws, row, lot_col)
+            cells["lot_no"] = [row, lot_col]
             values["part"] = str(part_val) if part_val else ""
+            cells["part"] = [row, part_col]
 
             for num, col in meas_cols:
                 values[f"meas_{num}"] = self._cell_val(ws, row, col)
+                cells[f"meas_{num}"] = [row, col]
 
             judge_val = self._cell_val(ws, row, judge_col) if judge_col else None
             values["judgment"] = judge_val
+            if judge_col:
+                cells["judgment"] = [row, judge_col]
 
             signer = self._cell_val(ws, row, sign_col) if sign_col else ""
 
@@ -124,6 +132,7 @@ class RD09AKParser(BaseParser):
                     "package": package,
                 },
             })
+            meta_rows.append({"row": row, "cells": cells})
 
             row += 1
 
@@ -133,4 +142,5 @@ class RD09AKParser(BaseParser):
             "headers": headers,
             "rows": rows,
             "extra": {"package": package},
+            "meta": {"row_map": meta_rows, "judgment_col": judge_col},
         }

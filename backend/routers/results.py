@@ -1,4 +1,5 @@
 """Results query API endpoints."""
+import json
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
@@ -10,6 +11,17 @@ from models import UploadRecord, InspectionResult, FormType
 from config import UPLOAD_DIR
 
 router = APIRouter(prefix="/api/results", tags=["results"])
+
+
+def _rejudge_result(db: Session, result: InspectionResult, form_code: str | None) -> dict:
+    """Re-judge a result using current specs, returning fresh judged_data."""
+    raw_data = result.raw_data if isinstance(result.raw_data, dict) else json.loads(result.raw_data or "{}")
+
+    if form_code and raw_data.get("rows"):
+        from services.judgment import judge_sheet_data
+        return judge_sheet_data(db, form_code, result.equipment_id, raw_data)
+
+    return result.judged_data if isinstance(result.judged_data, dict) else json.loads(result.judged_data or "{}")
 
 
 @router.get("/batches")
@@ -153,14 +165,34 @@ def list_uploads(
 
 @router.get("/{upload_id}")
 def get_upload_detail(upload_id: int, db: Session = Depends(get_db)):
-    """Get detailed results for a specific upload."""
+    """Get detailed results for a specific upload.
+
+    Re-judges each sheet with current specs so preview always reflects
+    the latest spec configuration.
+    """
     upload = db.query(UploadRecord).options(joinedload(UploadRecord.form_type)).get(upload_id)
     if not upload:
         raise HTTPException(404, "Upload not found")
 
+    form_code = upload.form_type.form_code if upload.form_type else None
+
     sheet_results = db.query(InspectionResult).filter(
         InspectionResult.upload_id == upload_id
     ).all()
+
+    sheets = []
+    for r in sheet_results:
+        judged = _rejudge_result(db, r, form_code)
+        sheets.append({
+            "id": r.id,
+            "sheet_name": r.sheet_name,
+            "equipment_id": r.equipment_id,
+            "has_spec": judged.get("has_spec", r.has_spec),
+            "overall_result": judged.get("overall_result", r.overall_result),
+            "inspection_date": r.inspection_date,
+            "judged_data": judged,
+            "raw_data": r.raw_data,
+        })
 
     return {
         "id": upload.id,
@@ -170,39 +202,34 @@ def get_upload_detail(upload_id: int, db: Session = Depends(get_db)):
         "upload_time": upload.upload_time.isoformat() if upload.upload_time else None,
         "status": upload.status,
         "error_message": upload.error_message,
-        "sheets": [
-            {
-                "id": r.id,
-                "sheet_name": r.sheet_name,
-                "equipment_id": r.equipment_id,
-                "has_spec": r.has_spec,
-                "overall_result": r.overall_result,
-                "inspection_date": r.inspection_date,
-                "judged_data": r.judged_data,
-                "raw_data": r.raw_data,
-            }
-            for r in sheet_results
-        ],
+        "sheets": sheets,
     }
 
 
 @router.get("/sheet/{result_id}")
 def get_sheet_result(result_id: int, db: Session = Depends(get_db)):
-    """Get detailed result for a specific sheet."""
+    """Get detailed result for a specific sheet.
+
+    Re-judges with current specs so preview always reflects latest spec configuration.
+    """
     result = db.query(InspectionResult).get(result_id)
     if not result:
         raise HTTPException(404, "Result not found")
+
+    upload = db.query(UploadRecord).options(joinedload(UploadRecord.form_type)).get(result.upload_id)
+    form_code = upload.form_type.form_code if upload and upload.form_type else None
+    judged = _rejudge_result(db, result, form_code)
 
     return {
         "id": result.id,
         "upload_id": result.upload_id,
         "sheet_name": result.sheet_name,
         "equipment_id": result.equipment_id,
-        "has_spec": result.has_spec,
-        "overall_result": result.overall_result,
+        "has_spec": judged.get("has_spec", result.has_spec),
+        "overall_result": judged.get("overall_result", result.overall_result),
         "inspection_date": result.inspection_date,
         "raw_data": result.raw_data,
-        "judged_data": result.judged_data,
+        "judged_data": judged,
     }
 
 
