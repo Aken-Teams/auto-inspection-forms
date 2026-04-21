@@ -103,10 +103,11 @@ export const previewImport = (formCode: string, file: File) => {
   });
 };
 
-export const confirmImport = (formCode: string, file: File) => {
+export const confirmImport = (formCode: string, file: File, force = false) => {
   const formData = new FormData();
   formData.append('file', file);
-  return api.post(`/specs/import/confirm?form_code=${formCode}`, formData, {
+  const params = `form_code=${formCode}${force ? '&force=true' : ''}`;
+  return api.post(`/specs/import/confirm?${params}`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 120000,
   });

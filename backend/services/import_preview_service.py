@@ -76,6 +76,23 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
         # Compute diffs for each equipment
         result["parsed_specs"] = _compute_diffs(db, form_type, parsed_specs)
 
+        # Check if spec content is identical to existing DB specs
+        from services.spec_file_service import check_specs_identical
+        content_identical = check_specs_identical(db, form_code, parsed_specs)
+        result["content_identical"] = content_identical
+        if content_identical:
+            result["file_validation"]["warnings"].append(
+                "此檔案的規格內容與現有資料完全相同，無需重複匯入"
+            )
+
+        # Aggregate blocking conditions
+        result["is_blocked"] = (
+            not result["structure_validation"]["valid"]
+            or len(result["parsed_specs"]) == 0
+            or result["file_validation"]["is_duplicate"]
+            or content_identical
+        )
+
         return result
     finally:
         wb.close()

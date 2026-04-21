@@ -97,6 +97,71 @@ def find_duplicate_across_all(file_hash: str) -> dict | None:
     return None
 
 
+def check_specs_identical(db: Session, form_code: str, parsed_specs: list[dict]) -> bool:
+    """Check if parsed specs from a file are identical to existing DB specs.
+
+    Catches the case where the same spec content appears in a different file
+    (e.g., user copies file, modifies metadata, but spec content is unchanged).
+    """
+    from models import FormType, SpecItem
+    from services.spec_version_service import compute_diff
+
+    form_type = db.query(FormType).filter(FormType.form_code == form_code).first()
+    if not form_type or not parsed_specs:
+        return False
+
+    for eq_spec in parsed_specs:
+        eq_id = eq_spec.get("equipment_id")
+        existing = db.query(FormSpec).filter(
+            FormSpec.form_type_id == form_type.id,
+            FormSpec.equipment_id == eq_id,
+        ).first()
+
+        if not existing:
+            return False  # New equipment = not identical
+
+        existing_items = db.query(SpecItem).filter(
+            SpecItem.form_spec_id == existing.id
+        ).order_by(SpecItem.display_order).all()
+
+        old_items = [
+            {
+                "item_name": item.item_name,
+                "spec_type": item.spec_type,
+                "min_value": float(item.min_value) if item.min_value is not None else None,
+                "max_value": float(item.max_value) if item.max_value is not None else None,
+                "expected_text": item.expected_text,
+                "threshold_value": float(item.threshold_value) if item.threshold_value is not None else None,
+                "threshold_operator": item.threshold_operator,
+                "group_name": item.group_name,
+                "sub_group": item.sub_group,
+            }
+            for item in existing_items
+        ]
+
+        new_items = []
+        for item in eq_spec.get("items", []):
+            parsed = item.get("parsed_spec", {})
+            new_items.append({
+                "item_name": item.get("item_name", ""),
+                "spec_type": parsed.get("spec_type", "text"),
+                "min_value": parsed.get("min_value"),
+                "max_value": parsed.get("max_value"),
+                "expected_text": parsed.get("expected_text"),
+                "threshold_value": parsed.get("threshold_value"),
+                "threshold_operator": parsed.get("threshold_operator"),
+                "group_name": item.get("group_name"),
+                "sub_group": item.get("sub_group"),
+            })
+
+        diff = compute_diff(old_items, new_items)
+        summary = diff["summary"]
+        if summary["added"] > 0 or summary["removed"] > 0 or summary["modified"] > 0:
+            return False  # Has changes = not identical
+
+    return True
+
+
 def get_absolute_path(stored_path: str) -> str:
     """Get absolute filesystem path for a stored spec file."""
     return os.path.join(SPEC_DIR, stored_path)

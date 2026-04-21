@@ -175,7 +175,7 @@ def _process_file(db: Session, upload: UploadRecord, filepath: str, filename: st
         ws = wb[sheet_name]
         try:
             parsed = parser.parse_sheet(ws, sheet_name)
-            equipment_id = extract_equipment_id_from_sheet(sheet_name, form_code) if form_code else sheet_name
+            equipment_id = (extract_equipment_id_from_sheet(sheet_name, form_code) if form_code else None) or sheet_name
 
             # Judge against specs
             if form_code:

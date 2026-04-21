@@ -153,32 +153,40 @@ def get_form_type_from_db(db: Session, form_code: str) -> FormType | None:
     return db.query(FormType).filter(FormType.form_code == form_code).first()
 
 
-def extract_equipment_id_from_sheet(sheet_name: str, form_code: str) -> str:
+def extract_equipment_id_from_sheet(sheet_name: str, form_code: str) -> str | None:
     """Extract equipment/machine ID from sheet name.
+
+    Returns None if no valid equipment ID pattern is found.
 
     Examples:
         'WCBA-0001' -> 'WCBA-0001'
         'RD-LZ-142026年04月' -> 'RD-LZ-14'
         'WTFB-0004RD_SMD切弯脚尺寸-班' -> 'WTFB-0004'
         'WPRN-0001' -> 'WPRN-0001'
+        'Sheet1' -> None
     """
     if form_code == "F-QA1021":
-        # Non-greedy match to separate equipment ID from year (e.g., RD-LZ-142026年 → RD-LZ-14)
         match = re.match(r"(RD-LZ-\d+?)(\d{4}年)", sheet_name)
         if not match:
             match = re.match(r"(RD-LZ-\d+)", sheet_name)
-        return match.group(1) if match else sheet_name
+        return match.group(1) if match else None
 
     if form_code in ("F-RD09AA", "F-RD09AB"):
         match = re.match(r"(WP\w+-\d+)", sheet_name)
-        return match.group(1) if match else sheet_name
+        return match.group(1) if match else None
 
     if form_code == "F-RD09AJ":
         match = re.match(r"(WCBA-\d+)", sheet_name)
-        return match.group(1) if match else sheet_name
+        return match.group(1) if match else None
 
     if form_code == "F-RD09AK":
         match = re.match(r"(WTFB-\d+)", sheet_name)
-        return match.group(1) if match else sheet_name
+        return match.group(1) if match else None
 
-    return sheet_name
+    # Generic fallback: common equipment ID patterns (e.g., ABCD-0001)
+    generic_match = re.match(r"([A-Z]{2,6}(?:-[A-Z]*)?-\d+)", sheet_name, re.IGNORECASE)
+    if generic_match:
+        return generic_match.group(1)
+
+    logger.warning(f"Could not extract equipment ID from sheet '{sheet_name}' for form '{form_code}'")
+    return None

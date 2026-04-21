@@ -47,6 +47,8 @@ interface PreviewResult {
   parsed_specs: PreviewSpec[];
   parse_method: 'builtin' | 'ai' | null;
   ai_confidence: number | null;
+  content_identical?: boolean;
+  is_blocked?: boolean;
 }
 
 export default function ImportPreviewDialog({ open, formCode, file, onSuccess, onCancel, toast }: Props) {
@@ -87,7 +89,9 @@ export default function ImportPreviewDialog({ open, formCode, file, onSuccess, o
 
   const hasBlockingIssues = preview && (
     !preview.structure_validation.valid ||
-    preview.parsed_specs.length === 0
+    preview.parsed_specs.length === 0 ||
+    preview.file_validation.is_duplicate ||
+    preview.content_identical
   );
 
   const allWarnings = [
@@ -171,8 +175,20 @@ export default function ImportPreviewDialog({ open, formCode, file, onSuccess, o
                 </div>
               </div>
 
+              {/* Duplicate / identical blocking */}
+              {preview.file_validation.is_duplicate && (
+                <div className="bg-rust/10 border border-rust/30 rounded-lg p-3 text-sm text-rust font-medium">
+                  ✗ {t('specs.duplicateBlocked', '此檔案已匯入過，無法重複匯入')}
+                </div>
+              )}
+              {preview.content_identical && !preview.file_validation.is_duplicate && (
+                <div className="bg-rust/10 border border-rust/30 rounded-lg p-3 text-sm text-rust font-medium">
+                  ✗ {t('specs.contentIdenticalBlocked', '此檔案的規格內容與現有資料完全相同，無需重複匯入')}
+                </div>
+              )}
+
               {/* Warnings */}
-              {allWarnings.length > 0 && (
+              {allWarnings.length > 0 && !(preview.file_validation.is_duplicate || preview.content_identical) && (
                 <div className="bg-terracotta/10 border border-terracotta/30 rounded-lg p-3">
                   <div className="text-sm font-medium text-terracotta mb-1">⚠ {t('specs.importWarnings')}</div>
                   <ul className="text-xs text-terracotta/80 space-y-0.5">

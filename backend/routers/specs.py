@@ -330,20 +330,47 @@ async def preview_import_endpoint(
             os.remove(filepath)
 
 
+def _check_content_dup(db: Session, filepath: str, form_code: str):
+    """Parse the file's summary sheet and raise 409 if specs are identical to DB."""
+    from services.import_preview_service import _preview_builtin, _preview_ai, BUILTIN_PARSERS
+    from services.spec_file_service import check_specs_identical
+
+    wb = load_workbook(filepath, data_only=True)
+    try:
+        if "汇总" not in wb.sheetnames:
+            return
+        ws = wb["汇总"]
+        form_type = db.query(FormType).filter(FormType.form_code == form_code).first()
+        if not form_type:
+            return
+
+        if form_code in BUILTIN_PARSERS:
+            parsed_specs = _preview_builtin(db, ws, form_type)
+        else:
+            parsed_specs, _ = _preview_ai(ws, form_type)
+
+        if parsed_specs and check_specs_identical(db, form_code, parsed_specs):
+            raise HTTPException(409, "此檔案的規格內容與現有資料完全相同，無需重複匯入")
+    finally:
+        wb.close()
+
+
 @router.post("/import/confirm")
 async def confirm_import_endpoint(
     form_code: str,
+    force: bool = False,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     """Execute import after user has reviewed the preview.
 
-    1. Store file permanently
-    2. Create version snapshots for affected specs
-    3. Import new specs
-    4. Save structural fingerprint
+    1. Check for duplicates (blocked unless force=True)
+    2. Store file permanently
+    3. Create version snapshots for affected specs
+    4. Import new specs
+    5. Save structural fingerprint
     """
-    from services.spec_file_service import store_spec_file
+    from services.spec_file_service import store_spec_file, find_duplicate, check_specs_identical
     from services.fingerprint_service import generate_fingerprint, save_fingerprint
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -354,6 +381,29 @@ async def confirm_import_endpoint(
         f.write(content)
 
     try:
+        # Duplicate checks (skip if force=True)
+        if not force:
+            file_hash_check = compute_file_hash(content)
+
+            dup_version = find_duplicate(db, form_code, file_hash_check)
+            if dup_version:
+                raise HTTPException(
+                    409,
+                    f"此檔案已匯入過 (設備: {dup_version['equipment_id']}, "
+                    f"時間: {dup_version['created_at']})"
+                )
+
+            dup_file = find_duplicate_across_all(file_hash_check)
+            if dup_file:
+                raise HTTPException(
+                    409,
+                    f"此檔案內容與「{dup_file['form_code']}」中的"
+                    f"「{dup_file['filename']}」完全相同"
+                )
+
+            # Content-level: parse and compare spec items against DB
+            _check_content_dup(db, filepath, form_code)
+
         # Store file permanently
         file_info = store_spec_file(content, form_code, file.filename)
 
@@ -533,15 +583,12 @@ async def create_from_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Create a new form type + spec groups from a sample Excel file.
+    """Create a new form type + import specs from a sample Excel file.
 
     Automatically creates:
     1. A FormType with file_pattern derived from filename
-    2. A FormSpec for each data sheet (with properly extracted equipment IDs)
-    3. If file has 汇总 sheet, auto-imports spec items from it
+    2. If file has 汇总 sheet, auto-imports spec items from it
     """
-    from parsers.identifier import extract_equipment_id_from_sheet
-
     # Check duplicate form code
     existing = db.query(FormType).filter(FormType.form_code == form_code).first()
     if existing:
@@ -606,22 +653,6 @@ async def create_from_file(
                 # Count what was created by the import
                 specs_created = db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
                 items_imported = db.query(SpecItem).join(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
-
-        # For sheets not covered by 汇总 import, create empty spec groups
-        existing_equipment_ids = set(
-            s.equipment_id for s in db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).all()
-        )
-        for sn in data_sheets:
-            equipment_id = extract_equipment_id_from_sheet(sn, form_code)
-            if equipment_id not in existing_equipment_ids:
-                spec = FormSpec(
-                    form_type_id=ft.id,
-                    equipment_id=equipment_id,
-                    equipment_name=sn,
-                )
-                db.add(spec)
-                existing_equipment_ids.add(equipment_id)
-                specs_created += 1
 
         wb.close()
         db.commit()
