@@ -180,6 +180,7 @@
     "notDuplicate": "Not a duplicate",
     "parseMethod": "Parse Method",
     "parseBuiltin": "Built-in Parser",
+    "parseHeader": "Header Extraction",
     "parseAI": "AI Parser",
     "aiConfidence": "Confidence",
     "equipmentSpecs": "Equipment Specs",

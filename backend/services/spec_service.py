@@ -53,8 +53,65 @@ def import_specs_from_excel(db: Session, filepath: str, form_code: str,
     wb = load_workbook(filepath, data_only=True)
 
     if "汇总" not in wb.sheetnames:
+        # Fallback: extract specs from data sheet headers
+        from services.header_spec_extractor import extract_specs_from_headers
+
+        form_type = db.query(FormType).filter(
+            FormType.form_code == form_code
+        ).first()
+        if not form_type:
+            wb.close()
+            return {"error": f"Form type {form_code} not found"}
+
+        header_specs = extract_specs_from_headers(
+            wb, form_code, form_type.form_name
+        )
         wb.close()
-        return {"error": "No 汇总 sheet found"}
+
+        if not header_specs or not any(eq.get("items") for eq in header_specs):
+            return {
+                "error": "No 汇总 sheet found and could not extract "
+                         "specs from data sheet headers"
+            }
+
+        specs_created = 0
+        items_created = 0
+        for eq in header_specs:
+            eq_id = eq.get("equipment_id", "UNIVERSAL")
+            eq_name = eq.get("equipment_name", eq_id)
+
+            spec = _get_or_create_spec(
+                db, form_type.id, eq_id, eq_name,
+                source_filename=source_filename,
+                stored_filepath=stored_filepath,
+                file_hash=file_hash,
+            )
+            specs_created += 1
+
+            for i, item in enumerate(eq.get("items", [])):
+                parsed = item.get("parsed_spec", {})
+                db.add(SpecItem(
+                    form_spec_id=spec.id,
+                    item_name=item.get("item_name", f"item_{i}"),
+                    spec_type=parsed.get("spec_type", "skip"),
+                    min_value=parsed.get("min_value"),
+                    max_value=parsed.get("max_value"),
+                    expected_text=parsed.get("expected_text"),
+                    threshold_value=parsed.get("threshold_value"),
+                    threshold_operator=parsed.get("threshold_operator"),
+                    display_order=item.get("display_order", i),
+                    group_name=item.get("group_name"),
+                    sub_group=item.get("sub_group"),
+                ))
+                items_created += 1
+
+        db.commit()
+        return {
+            "success": True,
+            "parse_method": "header",
+            "specs_created": specs_created,
+            "items_created": items_created,
+        }
 
     ws = wb["汇总"]
     form_type = db.query(FormType).filter(FormType.form_code == form_code).first()

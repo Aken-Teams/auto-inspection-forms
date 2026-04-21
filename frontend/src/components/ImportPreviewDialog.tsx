@@ -45,7 +45,7 @@ interface PreviewResult {
     warnings: string[];
   };
   parsed_specs: PreviewSpec[];
-  parse_method: 'builtin' | 'ai' | null;
+  parse_method: 'builtin' | 'ai' | 'header' | null;
   ai_confidence: number | null;
   content_identical?: boolean;
   is_blocked?: boolean;
@@ -164,7 +164,11 @@ export default function ImportPreviewDialog({ open, formCode, file, onSuccess, o
                   <div>
                     <span className="text-charcoal/60">{t('specs.parseMethod')}: </span>
                     <span className="font-medium">
-                      {preview.parse_method === 'builtin' ? t('specs.parseBuiltin') : t('specs.parseAI')}
+                      {preview.parse_method === 'builtin'
+                        ? t('specs.parseBuiltin')
+                        : preview.parse_method === 'header'
+                        ? t('specs.parseHeader')
+                        : t('specs.parseAI')}
                       {preview.ai_confidence != null && (
                         <span className="text-charcoal/50 ml-1">
                           ({t('specs.aiConfidence')}: {Math.round(preview.ai_confidence * 100)}%)

@@ -42,11 +42,56 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
 
         # Check if 汇总 sheet exists
         if "汇总" not in wb.sheetnames:
-            result["structure_validation"] = {
-                "valid": False,
-                "warnings": ["No 汇总 (summary) sheet found in this file"],
-            }
-            return result
+            # Fallback: extract specs from data sheet headers
+            from services.header_spec_extractor import extract_specs_from_headers
+
+            form_type = db.query(FormType).filter(
+                FormType.form_code == form_code
+            ).first()
+            if not form_type:
+                result["structure_validation"] = {
+                    "valid": False,
+                    "warnings": [f"Form type {form_code} not found"],
+                }
+                return result
+
+            header_specs = extract_specs_from_headers(
+                wb, form_code, form_type.form_name
+            )
+            if header_specs and any(eq.get("items") for eq in header_specs):
+                result["structure_validation"] = {
+                    "valid": True,
+                    "warnings": [
+                        "此檔案無匯總 sheet，已從資料表頭自動提取檢查項目"
+                    ],
+                }
+                result["parse_method"] = "header"
+                result["parsed_specs"] = _compute_diffs(db, form_type, header_specs)
+
+                from services.spec_file_service import check_specs_identical
+                content_identical = check_specs_identical(
+                    db, form_code, header_specs
+                )
+                result["content_identical"] = content_identical
+                if content_identical:
+                    result["file_validation"]["warnings"].append(
+                        "此檔案的規格內容與現有資料完全相同，無需重複匯入"
+                    )
+                result["is_blocked"] = (
+                    not result["structure_validation"]["valid"]
+                    or len(result["parsed_specs"]) == 0
+                    or result["file_validation"]["is_duplicate"]
+                    or content_identical
+                )
+                return result
+            else:
+                result["structure_validation"] = {
+                    "valid": False,
+                    "warnings": [
+                        "此檔案無匯總 sheet，且無法從資料表頭提取檢查項目"
+                    ],
+                }
+                return result
 
         ws = wb["汇总"]
 

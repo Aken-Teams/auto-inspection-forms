@@ -180,6 +180,7 @@
     "notDuplicate": "非重复文件",
     "parseMethod": "解析方式",
     "parseBuiltin": "内置解析器",
+    "parseHeader": "标题行提取",
     "parseAI": "AI 解析器",
     "aiConfidence": "置信度",
     "equipmentSpecs": "设备规格",

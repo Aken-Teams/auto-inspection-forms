@@ -183,10 +183,27 @@ def extract_equipment_id_from_sheet(sheet_name: str, form_code: str) -> str | No
         match = re.match(r"(WTFB-\d+)", sheet_name)
         return match.group(1) if match else None
 
-    # Generic fallback: common equipment ID patterns (e.g., ABCD-0001)
-    generic_match = re.match(r"([A-Z]{2,6}(?:-[A-Z]*)?-\d+)", sheet_name, re.IGNORECASE)
-    if generic_match:
-        return generic_match.group(1)
+    # Generic fallback: multiple equipment ID patterns from AU files
+
+    # Pattern 1: WXXXX-0001 (e.g., WPRN-0001, WCBA-0007, WOVS-0011, WTFB-0004)
+    w_match = re.match(r"(W[A-Z]{2,4}-\d{4})", sheet_name)
+    if w_match:
+        return w_match.group(1)
+
+    # Pattern 2: RD-XX-NN (e.g., RD-LZ-14, RD-CS-01, RD_AU_05)
+    rd_match = re.match(r"(RD[-_][A-Z]{2,}[-_]\d{2,4})", sheet_name)
+    if rd_match:
+        return rd_match.group(1)
+
+    # Pattern 3: MF-XX-NNN (e.g., MF-DD-280)
+    mf_match = re.match(r"(MF[-_][A-Z]{2,}[-_]\d+)", sheet_name)
+    if mf_match:
+        return mf_match.group(1)
+
+    # Pattern 4: General XXXX-NNNN
+    general_match = re.match(r"([A-Z]{2,6}(?:-[A-Z]*)?-\d+)", sheet_name, re.IGNORECASE)
+    if general_match:
+        return general_match.group(1)
 
     logger.warning(f"Could not extract equipment ID from sheet '{sheet_name}' for form '{form_code}'")
     return None

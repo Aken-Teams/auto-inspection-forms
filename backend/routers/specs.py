@@ -338,7 +338,16 @@ def _check_content_dup(db: Session, filepath: str, form_code: str):
     wb = load_workbook(filepath, data_only=True)
     try:
         if "汇总" not in wb.sheetnames:
+            # Try header-based extraction for content dedup
+            from services.header_spec_extractor import extract_specs_from_headers
+            header_specs = extract_specs_from_headers(wb, form_code)
+            if header_specs and check_specs_identical(db, form_code, header_specs):
+                raise HTTPException(
+                    409,
+                    "此檔案的規格內容與現有資料完全相同，無需重複匯入"
+                )
             return
+
         ws = wb["汇总"]
         form_type = db.query(FormType).filter(FormType.form_code == form_code).first()
         if not form_type:
@@ -424,6 +433,13 @@ async def confirm_import_endpoint(
                     fp = generate_fingerprint(wb2["汇总"])
                     save_fingerprint(db, form_code, fp)
                     db.commit()
+                else:
+                    # For non-summary files, fingerprint first data sheet
+                    data_sheets_fp = [s for s in wb2.sheetnames if s != "汇总"]
+                    if data_sheets_fp:
+                        fp = generate_fingerprint(wb2[data_sheets_fp[0]])
+                        save_fingerprint(db, form_code, fp)
+                        db.commit()
                 wb2.close()
             except Exception as e:
                 import logging
@@ -641,18 +657,16 @@ async def create_from_file(
         with open(stored_path, "wb") as sf:
             sf.write(content)
 
-        # If file has 汇总 sheet, auto-import specs from it (creates proper spec groups + items)
-        if has_summary:
-            import_result = import_specs_from_excel(
-                db, filepath, form_code,
-                source_filename=file.filename,
-                stored_filepath=stored_path,
-                file_hash=file_hash,
-            )
-            if import_result.get("success"):
-                # Count what was created by the import
-                specs_created = db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
-                items_imported = db.query(SpecItem).join(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
+        # Auto-import specs (uses 汇总 if present, falls back to header extraction)
+        import_result = import_specs_from_excel(
+            db, filepath, form_code,
+            source_filename=file.filename,
+            stored_filepath=stored_path,
+            file_hash=file_hash,
+        )
+        if import_result.get("success"):
+            specs_created = db.query(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
+            items_imported = db.query(SpecItem).join(FormSpec).filter(FormSpec.form_type_id == ft.id).count()
 
         wb.close()
         db.commit()
