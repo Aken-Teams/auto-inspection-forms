@@ -8,7 +8,7 @@ import httpx
 sys.stdout.reconfigure(encoding='utf-8')
 
 AU_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "AU未建立规格点检表", "AU")
-API_URL = "http://localhost:8000/api/upload"
+API_URL = "http://localhost:12061/api/upload"
 TEMP_DIR = os.path.join(os.environ.get("TEMP", "/tmp"), "au_test")
 
 

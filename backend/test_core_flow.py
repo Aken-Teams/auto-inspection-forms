@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 import httpx
 
-BASE = "http://localhost:8000"
+BASE = "http://localhost:12061"
 AU_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "AU未建立规格点检表", "AU")
 
 client = httpx.Client(base_url=BASE, timeout=30)

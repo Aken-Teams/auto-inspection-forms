@@ -5,7 +5,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 import httpx
 import json
 
-BASE = "http://localhost:8000"
+BASE = "http://localhost:12061"
 client = httpx.Client(base_url=BASE, timeout=30)
 
 

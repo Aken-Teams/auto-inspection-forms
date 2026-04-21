@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"pnpm run dev:backend\" \"pnpm run dev:frontend\"",
-    "dev:backend": "cd backend && set PYTHONIOENCODING=utf-8 && python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
-    "dev:frontend": "cd frontend && npx vite --port 5173"
+    "dev:backend": "cd backend && set PYTHONIOENCODING=utf-8 && python -m uvicorn main:app --host 0.0.0.0 --port 12061 --reload",
+    "dev:frontend": "cd frontend && npx vite --port 12060"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

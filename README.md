@@ -186,8 +186,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 pnpm dev
 
 # 或分別啟動
-pnpm dev:backend    # 後端 http://localhost:8000
-pnpm dev:frontend   # 前端 http://localhost:5173
+pnpm dev:backend    # 後端 http://localhost:12061
+pnpm dev:frontend   # 前端 http://localhost:12060
 ```
 
 前端開發伺服器會自動將 `/api` 請求代理到後端。
