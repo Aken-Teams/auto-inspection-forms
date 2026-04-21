@@ -1,10 +1,94 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../components/Toast';
 import { getFormSpecs, updateSpec } from '../api/client';
 import SpecVersionHistory from '../components/SpecVersionHistory';
 import type { FormSpec, SpecItemData } from '../types';
+
+function CustomSelect({ value, onChange, options, className = '' }: {
+  value: string;
+  onChange: (val: string) => void;
+  options: { value: string; label: string }[];
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const selected = options.find(o => o.value === value);
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between border border-sand rounded px-2 py-1.5 text-sm
+                   bg-white hover:border-terracotta/50 focus:outline-none focus:border-terracotta transition-colors"
+      >
+        <span className="truncate text-charcoal">{selected?.label || value}</span>
+        <svg className={`w-3.5 h-3.5 text-warm-gray ml-1 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 w-full bg-white border border-sand rounded shadow-lg py-1 max-h-48 overflow-y-auto">
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-sm transition-colors
+                ${opt.value === value
+                  ? 'bg-terracotta/10 text-terracotta font-medium'
+                  : 'text-charcoal hover:bg-sand/30'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HelpTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <span ref={ref} className="relative inline-block ml-1">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className="text-warm-gray font-normal cursor-help hover:text-charcoal transition-colors"
+      >(?)</button>
+      {open && (
+        <div className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-1 w-48 px-3 py-2 text-xs font-normal text-charcoal bg-white border border-sand rounded shadow-lg leading-relaxed whitespace-normal">
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
 
 const SPEC_TYPE_KEYS: Record<string, string> = {
   range: 'specDetail.specTypeRange',
@@ -260,11 +344,11 @@ export default function SpecDetail() {
               <thead>
                 <tr className="bg-paper border-b border-sand/50">
                   <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide w-8">#</th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.itemNameHint')}>{t('specDetail.itemName')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.groupHint')}>{t('specDetail.group')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
-                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide" title={t('specDetail.subGroupHint')}>{t('specDetail.subGroup')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
-                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide" title={t('specDetail.typeHint')}>{t('specDetail.type')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
-                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide" title={t('specDetail.specValueHint')}>{t('specDetail.specValue')} <span className="text-warm-gray font-normal cursor-help">(?)</span></th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.itemName')}<HelpTip text={t('specDetail.itemNameHint')} /></th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.group')}<HelpTip text={t('specDetail.groupHint')} /></th>
+                  <th className="px-4 py-3 text-left font-medium text-charcoal tracking-wide">{t('specDetail.subGroup')}<HelpTip text={t('specDetail.subGroupHint')} /></th>
+                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide">{t('specDetail.type')}<HelpTip text={t('specDetail.typeHint')} /></th>
+                  <th className="px-4 py-3 text-center font-medium text-charcoal tracking-wide">{t('specDetail.specValue')}<HelpTip text={t('specDetail.specValueHint')} /></th>
                 </tr>
               </thead>
               <tbody>
@@ -326,19 +410,19 @@ export default function SpecDetail() {
                 </div>
                 <div>
                   <label className="text-[10px] text-warm-gray tracking-wide">{t('specDetail.type')}</label>
-                  <select
+                  <CustomSelect
                     value={item.spec_type}
-                    onChange={e => updateField(idx, 'spec_type', e.target.value)}
-                    className="w-full border border-sand rounded px-2 py-1.5 text-sm focus:outline-none focus:border-terracotta bg-white"
-                  >
-                    <option value="range">{t('specDetail.specTypeRange')}</option>
-                    <option value="check">{t('specDetail.specTypeCheck')}</option>
-                    <option value="text">{t('specDetail.specTypeText')}</option>
-                    <option value="threshold">{t('specDetail.specTypeThreshold')}</option>
-                    <option value="min">{t('specDetail.specTypeMin')}</option>
-                    <option value="max">{t('specDetail.specTypeMax')}</option>
-                    <option value="exact">{t('specDetail.specTypeExact')}</option>
-                  </select>
+                    onChange={val => updateField(idx, 'spec_type', val)}
+                    options={[
+                      { value: 'range', label: t('specDetail.specTypeRange') },
+                      { value: 'check', label: t('specDetail.specTypeCheck') },
+                      { value: 'text', label: t('specDetail.specTypeText') },
+                      { value: 'threshold', label: t('specDetail.specTypeThreshold') },
+                      { value: 'min', label: t('specDetail.specTypeMin') },
+                      { value: 'max', label: t('specDetail.specTypeMax') },
+                      { value: 'exact', label: t('specDetail.specTypeExact') },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] text-warm-gray tracking-wide">{t('specDetail.specValue')}</label>
@@ -370,14 +454,21 @@ export default function SpecDetail() {
                       className="w-full border border-sand rounded px-2 py-1.5 text-sm focus:outline-none focus:border-terracotta" />
                   ) : (
                     <div className="flex gap-1 items-center">
-                      <select value={item.threshold_operator}
-                        onChange={e => updateField(idx, 'threshold_operator', e.target.value)}
-                        className="w-16 border border-sand rounded px-1 py-1.5 text-sm focus:outline-none focus:border-terracotta bg-white">
-                        <option value="<">&lt;</option>
-                        <option value="<=">&le;</option>
-                        <option value=">">&gt;</option>
-                        <option value=">=">&ge;</option>
-                      </select>
+                      <CustomSelect
+                        value={item.threshold_operator}
+                        onChange={val => updateField(idx, 'threshold_operator', val)}
+                        className="w-14 shrink-0"
+                        options={[
+                          { value: '=', label: '=' },
+                          { value: '!=', label: '\u2260' },
+                          { value: '<', label: '<' },
+                          { value: '<=', label: '\u2264' },
+                          { value: '>', label: '>' },
+                          { value: '>=', label: '\u2265' },
+                          { value: '~', label: '\u2248' },
+                          { value: '+-', label: '\u00B1' },
+                        ]}
+                      />
                       <input type="text" value={item.threshold_value}
                         onChange={e => updateField(idx, 'threshold_value', e.target.value)}
                         className="w-full border border-sand rounded px-2 py-1.5 text-sm focus:outline-none focus:border-terracotta" />

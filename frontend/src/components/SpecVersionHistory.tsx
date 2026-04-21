@@ -48,11 +48,39 @@ interface Props {
   onRollback?: () => void;
 }
 
-const SOURCE_ICONS: Record<string, string> = {
-  import: '📥',
-  manual_edit: '✏️',
-  rollback: '↩️',
+const SPEC_TYPE_KEYS: Record<string, string> = {
+  range: 'specDetail.specTypeRange',
+  check: 'specDetail.specTypeCheck',
+  text: 'specDetail.specTypeText',
+  threshold: 'specDetail.specTypeThreshold',
+  min: 'specDetail.specTypeMin',
+  max: 'specDetail.specTypeMax',
+  exact: 'specDetail.specTypeExact',
+  skip: 'specDetail.specTypeSkip',
 };
+
+function SourceIcon({ source }: { source: string }) {
+  if (source === 'import') {
+    return (
+      <svg className="w-4 h-4 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+      </svg>
+    );
+  }
+  if (source === 'manual_edit') {
+    return (
+      <svg className="w-4 h-4 text-terracotta" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+      </svg>
+    );
+  }
+  // rollback
+  return (
+    <svg className="w-4 h-4 text-warm-gray" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
+    </svg>
+  );
+}
 
 export default function SpecVersionHistory({ specId, onRollback }: Props) {
   const { t } = useTranslation();
@@ -104,11 +132,10 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
   };
 
   const handleDiff = async (v: VersionSummary) => {
-    // Compare this version with the one before it
     const idx = versions.findIndex(ver => ver.id === v.id);
-    if (idx < 0 || idx >= versions.length - 1) return; // no older version
+    if (idx < 0 || idx >= versions.length - 1) return;
 
-    const older = versions[idx + 1]; // versions are newest-first
+    const older = versions[idx + 1];
     setDiffLoading(true);
     try {
       const [res1, res2] = await Promise.all([
@@ -161,7 +188,9 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
           {/* Version header */}
           <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3 min-w-0">
-              <span className="text-base shrink-0">{SOURCE_ICONS[v.source] || '📋'}</span>
+              <div className="w-8 h-8 rounded-full bg-paper flex items-center justify-center shrink-0 border border-sand/40">
+                <SourceIcon source={v.source} />
+              </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-charcoal text-sm">
@@ -202,14 +231,18 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={() => handleExpand(v)}
-                className="text-xs px-2 py-1 text-charcoal/60 hover:text-charcoal hover:bg-sand/30 rounded transition-colors"
+                className={`text-xs px-2.5 py-1 rounded transition-colors ${
+                  expandedId === v.id
+                    ? 'text-terracotta bg-terracotta/10'
+                    : 'text-charcoal/60 hover:text-charcoal hover:bg-sand/30'
+                }`}
               >
-                {t('specs.versionView')}
+                {expandedId === v.id ? t('specs.cancel') : t('specs.versionView')}
               </button>
               {idx < versions.length - 1 && (
                 <button
                   onClick={() => handleDiff(v)}
-                  className="text-xs px-2 py-1 text-charcoal/60 hover:text-terracotta hover:bg-terracotta/10 rounded transition-colors"
+                  className="text-xs px-2.5 py-1 text-charcoal/60 hover:text-terracotta hover:bg-terracotta/10 rounded transition-colors"
                 >
                   {t('specs.versionDiff')}
                 </button>
@@ -217,7 +250,7 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
               {idx > 0 && (
                 <button
                   onClick={() => setRollbackTarget(v)}
-                  className="text-xs px-2 py-1 text-charcoal/60 hover:text-rust hover:bg-rust/10 rounded transition-colors"
+                  className="text-xs px-2.5 py-1 text-charcoal/60 hover:text-rust hover:bg-rust/10 rounded transition-colors"
                 >
                   {t('specs.versionRollback')}
                 </button>
@@ -227,32 +260,36 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
 
           {/* Expanded detail */}
           {expandedId === v.id && (
-            <div className="border-t border-sand/40 px-4 py-3 bg-paper/50">
+            <div className="border-t border-sand/40 bg-paper/50">
               {detailLoading ? (
-                <p className="text-xs text-warm-gray">{t('common.loading')}</p>
+                <p className="text-xs text-warm-gray px-4 py-4">{t('common.loading')}</p>
               ) : detail ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-sand/30">
-                        <th className="px-2 py-1 text-left font-medium text-charcoal/70">#</th>
-                        <th className="px-2 py-1 text-left font-medium text-charcoal/70">{t('specDetail.itemName')}</th>
-                        <th className="px-2 py-1 text-left font-medium text-charcoal/70">{t('specDetail.group')}</th>
-                        <th className="px-2 py-1 text-left font-medium text-charcoal/70">{t('specDetail.type')}</th>
-                        <th className="px-2 py-1 text-left font-medium text-charcoal/70">{t('specDetail.specValue')}</th>
+                      <tr className="bg-sand/30 border-b border-sand/40">
+                        <th className="px-4 py-2 text-left font-medium text-charcoal/70 w-10">#</th>
+                        <th className="px-4 py-2 text-left font-medium text-charcoal/70">{t('specDetail.itemName')}</th>
+                        <th className="px-4 py-2 text-left font-medium text-charcoal/70">{t('specDetail.group')}</th>
+                        <th className="px-4 py-2 text-center font-medium text-charcoal/70">{t('specDetail.type')}</th>
+                        <th className="px-4 py-2 text-center font-medium text-charcoal/70">{t('specDetail.specValue')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {detail.items_snapshot.map((item, i) => (
-                        <tr key={i} className="border-b border-sand/20">
-                          <td className="px-2 py-1 text-warm-gray">{i + 1}</td>
-                          <td className="px-2 py-1 text-charcoal">{item.item_name}</td>
-                          <td className="px-2 py-1 text-charcoal/60">
+                        <tr key={i} className={`border-b border-sand/20 ${i % 2 === 1 ? 'bg-cream/30' : ''}`}>
+                          <td className="px-4 py-2 text-warm-gray text-xs">{i + 1}</td>
+                          <td className="px-4 py-2 text-charcoal font-medium">{item.item_name}</td>
+                          <td className="px-4 py-2 text-warm-gray">
                             {item.group_name || '-'}
                             {item.sub_group ? ` / ${item.sub_group}` : ''}
                           </td>
-                          <td className="px-2 py-1">{item.spec_type}</td>
-                          <td className="px-2 py-1 text-terracotta">{formatSnapshotValue(item)}</td>
+                          <td className="px-4 py-2 text-center">
+                            <span className="text-xs px-2 py-0.5 rounded bg-sand/30 text-charcoal">
+                              {t(SPEC_TYPE_KEYS[item.spec_type] || 'specDetail.specTypeRange')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-center text-terracotta font-medium">{formatSnapshotValue(item)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -316,17 +353,17 @@ export default function SpecVersionHistory({ specId, onRollback }: Props) {
 function formatSnapshotValue(item: SnapshotItem): string {
   switch (item.spec_type) {
     case 'range':
-      return `${item.min_value ?? ''}~${item.max_value ?? ''}`;
+      return `${item.min_value ?? ''} ~ ${item.max_value ?? ''}`;
     case 'min':
-      return `≥${item.min_value ?? ''}`;
+      return `>= ${item.min_value ?? ''}`;
     case 'max':
-      return `≤${item.max_value ?? ''}`;
+      return `<= ${item.max_value ?? ''}`;
     case 'exact':
       return item.expected_text || '';
     case 'threshold':
-      return `${item.threshold_operator || '>='}${item.threshold_value ?? ''}`;
+      return `${item.threshold_operator || '>='} ${item.threshold_value ?? ''}`;
     case 'check':
-      return '√';
+      return String.fromCharCode(0x2713);
     case 'skip':
       return '-';
     default:
