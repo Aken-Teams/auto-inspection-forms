@@ -152,6 +152,111 @@ def ai_parse_summary_sheet(ws: Worksheet, form_code: str, form_name: str) -> dic
     return parsed
 
 
+def ai_parse_data_sheet(ws: Worksheet, form_code: str, form_name: str) -> dict | None:
+    """Use DeepSeek AI to parse a DATA sheet (not summary) and extract spec items.
+
+    This is the last-resort fallback when:
+    1. No 汇总 sheet exists
+    2. Rule-based header extraction also failed
+
+    Returns same format as ai_parse_summary_sheet.
+    """
+    if not is_ai_available():
+        return None
+
+    content = extract_summary_content(ws)
+    if not content.strip():
+        return None
+
+    prompt = _build_data_sheet_prompt(content, form_code, form_name)
+
+    result = _call_deepseek(
+        [{"role": "user", "content": prompt}],
+        temperature=0.1,
+        max_tokens=8000,
+    )
+
+    if not result:
+        logger.warning(f"AI returned empty response for data sheet of {form_code}")
+        return None
+
+    parsed = _extract_json(result)
+    if not parsed or "equipment_specs" not in parsed:
+        logger.warning(f"Failed to extract structured data from AI for data sheet of {form_code}")
+        return None
+
+    # Post-process: run each spec_value through parse_spec_string
+    for eq in parsed.get("equipment_specs", []):
+        for item in eq.get("items", []):
+            spec_str = str(item.get("spec_value", ""))
+            spec_parsed = parse_spec_string(spec_str)
+            item["parsed_spec"] = spec_parsed
+
+    logger.info(
+        f"AI parsed data sheet for {form_code}: "
+        f"{len(parsed['equipment_specs'])} equipment(s), "
+        f"confidence={parsed.get('confidence', 'N/A')}"
+    )
+    return parsed
+
+
+def _build_data_sheet_prompt(sheet_content: str, form_code: str, form_name: str) -> str:
+    """Build AI prompt for parsing a raw data sheet (no summary sheet available)."""
+    truncated = sheet_content[:6000]
+
+    return f"""你是一个工业检验表格分析专家。以下是一张检验记录的**原始数据工作表**（不是汇总表），请从中提取检验项目定义。
+
+表单信息:
+- 表单编号: {form_code}
+- 表单名称: {form_name}
+
+工作表内容（每行格式为 Row N: cell1 | cell2 | ...）:
+{truncated}
+
+这是一张**原始数据表**，检验项目可能出现在:
+1. **列标题**（表头行）: 检验项目名称排列在某一行中，每列一个项目，下方是逐次检验数据
+2. **行标签**（纵向排列）: 检验项目名称排列在某一列中，每行一个项目，右方是逐次检验数据
+3. **日历/网格格式**: 表头区域包含「XXX规格：value」形式的规格定义
+4. **混合格式**: 多层表头、分区编号等复杂结构
+
+请从表头/标签中识别出**检验项目名称**和**规格值**（如果有的话）。
+
+需要**跳过**以下类型的栏位（它们是元数据，不是检验项目）:
+- 日期、时间、班别、班次
+- 签名、确认、判定、备注
+- 序号、工单号、批号、料号
+- 机台号、设备编号、柜号
+
+请以JSON格式返回（不要添加其他说明文字）:
+{{
+  "equipment_specs": [
+    {{
+      "equipment_id": "UNIVERSAL",
+      "equipment_name": "{form_name or form_code} 通用规格",
+      "items": [
+        {{
+          "item_name": "检验项目名称",
+          "spec_value": "规格值（如 125~145, ≥3, √ 等，若无规格则留空字符串）",
+          "group_name": "分组名（如有，否则null）",
+          "sub_group": null,
+          "display_order": 0
+        }}
+      ]
+    }}
+  ],
+  "confidence": 0.7,
+  "analysis_notes": "简要说明你识别到的表格结构和检验项目"
+}}
+
+注意:
+1. spec_value 保持原始格式，不要转换
+2. 如果表头中嵌入了规格范围（如「顶针高度（300-750）um」），提取为 spec_value="300~750"
+3. 如果表头中嵌入了阈值（如「缺胶≤0.07%」），提取为 spec_value="≤0.07%"
+4. 如果看到「XXX规格：value」形式（如「温度规格：20-26℃」），提取项目名=XXX，spec_value=value
+5. 没有明确规格的项目，spec_value 设为空���符串
+6. confidence 填写你对结果的信心度（0-1）"""
+
+
 def _build_parse_prompt(sheet_content: str, form_code: str, form_name: str) -> str:
     """Build the AI prompt for summary sheet parsing."""
     # Limit content to prevent token overflow

@@ -69,9 +69,67 @@ def import_specs_from_excel(db: Session, filepath: str, form_code: str,
         wb.close()
 
         if not header_specs or not any(eq.get("items") for eq in header_specs):
+            # 3rd fallback: AI analysis of data sheet
+            from services.ai_spec_parser import ai_parse_data_sheet
+            data_sheets = [s for s in wb.sheetnames if s != "汇总"]
+            ai_specs = None
+            if data_sheets:
+                ai_result = ai_parse_data_sheet(
+                    wb[data_sheets[0]], form_code, form_type.form_name
+                )
+                if ai_result:
+                    ai_specs = ai_result.get("equipment_specs", [])
+
+            if not ai_specs or not any(eq.get("items", []) for eq in ai_specs):
+                wb.close()
+                return {
+                    "error": "No 汇总 sheet found and could not extract "
+                             "specs from data sheet headers or AI analysis"
+                }
+
+            # Use AI-extracted specs
+            wb.close()
+            specs_created = 0
+            items_created = 0
+            for eq in ai_specs:
+                eq_id = eq.get("equipment_id", "UNIVERSAL")
+                eq_name = eq.get("equipment_name", eq_id)
+
+                spec = _get_or_create_spec(
+                    db, form_type.id, eq_id, eq_name,
+                    source_filename=source_filename,
+                    stored_filepath=stored_filepath,
+                    file_hash=file_hash,
+                )
+                specs_created += 1
+
+                for i, item in enumerate(eq.get("items", [])):
+                    parsed = item.get("parsed_spec", {})
+                    if not parsed:
+                        spec_str = str(item.get("spec_value", ""))
+                        parsed = parse_spec_string(spec_str)
+                    db.add(SpecItem(
+                        form_spec_id=spec.id,
+                        item_name=item.get("item_name", f"item_{i}"),
+                        spec_type=parsed.get("spec_type", "skip"),
+                        min_value=parsed.get("min_value"),
+                        max_value=parsed.get("max_value"),
+                        expected_text=parsed.get("expected_text"),
+                        threshold_value=parsed.get("threshold_value"),
+                        threshold_operator=parsed.get("threshold_operator"),
+                        display_order=item.get("display_order", i),
+                        group_name=item.get("group_name"),
+                        sub_group=item.get("sub_group"),
+                    ))
+                    items_created += 1
+
+            db.commit()
             return {
-                "error": "No 汇总 sheet found and could not extract "
-                         "specs from data sheet headers"
+                "success": True,
+                "parse_method": "ai",
+                "ai_confidence": ai_result.get("confidence") if ai_result else None,
+                "specs_created": specs_created,
+                "items_created": items_created,
             }
 
         specs_created = 0

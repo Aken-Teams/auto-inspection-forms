@@ -1,6 +1,9 @@
 """Generic parser for unrecognized Excel inspection forms."""
 from parsers.base import BaseParser
 
+# Labels that indicate a judgment/result column
+_JUDGMENT_LABELS = {"判定", "判定结果", "判定結果", "结果", "結果", "合否", "判断", "判斷"}
+
 
 class GenericParser(BaseParser):
     form_code = "GENERIC"
@@ -29,13 +32,18 @@ class GenericParser(BaseParser):
                 "rows": [],
             }
 
-        # Build headers from header row
+        # Build headers from header row, detect judgment column
         col_headers = {}
+        judgment_col = None
         for col in range(1, ws.max_column + 1):
             val = self._cell_val(ws, header_row, col)
             if val:
-                key = f"col_{col}"
                 label = str(val).replace("\n", " ").strip()
+                # Check if this column is a judgment column
+                if label in _JUDGMENT_LABELS:
+                    judgment_col = col
+                    continue  # Don't include judgment column as a data header
+                key = f"col_{col}"
                 headers.append({"key": key, "label": label, "group": "data"})
                 col_headers[col] = key
 
@@ -69,5 +77,5 @@ class GenericParser(BaseParser):
             "inspection_date": "",
             "headers": headers,
             "rows": rows,
-            "meta": {"row_map": meta_rows, "judgment_col": None},
+            "meta": {"row_map": meta_rows, "judgment_col": judgment_col},
         }

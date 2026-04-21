@@ -61,10 +61,25 @@ def judge_value(raw_value, spec_type: str, min_value=None, max_value=None,
     raw_str = str(raw_value).strip()
 
     if spec_type == "check":
-        return "OK" if raw_str in ("√", "✓", "V", "v", "○") else "NG"
+        # Accept various check mark representations
+        ok_values = {
+            "√", "✓", "✔", "V", "v", "○", "O", "o",
+            "OK", "ok", "Ok", "Y", "y", "YES", "yes",
+            "合格", "正常", "良", "良好", "PASS", "pass",
+            "TRUE", "True", "true", "1", "是",
+        }
+        return "OK" if raw_str in ok_values else "NG"
 
     if spec_type == "text":
-        return "OK" if raw_str == expected_text else "NG"
+        # Normalize whitespace for comparison
+        raw_norm = re.sub(r"\s+", "", raw_str)
+        exp_norm = re.sub(r"\s+", "", (expected_text or ""))
+        if raw_norm == exp_norm:
+            return "OK"
+        # Case-insensitive fallback
+        if raw_norm.lower() == exp_norm.lower():
+            return "OK"
+        return "NG"
 
     if spec_type == "range":
         try:

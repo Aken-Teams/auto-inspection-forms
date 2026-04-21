@@ -61,6 +61,10 @@ _SKIP_LABELS = {
     "品名", "产品名称", "不良项目",
     "不良数(PCS)", "不良数（PCS）", "不良率(%)", "不良率（%）",
     "不良品数", "不良品率",
+    # Structural column labels (not check items)
+    "参数类别", "参数名称", "管控规格", "管控值", "单位",
+    "检查标准", "检查方法", "判定标准", "检查内容",
+    "检查结果", "测量结果",
 }
 
 # Partial matches — if label contains any of these, skip it
@@ -366,8 +370,11 @@ def _try_row_label_extraction(ws):
         return items
 
     # --- Strategy 2: Pattern E (Pivoted Matrix) ---
-    # Scan columns C and B for vertical blocks of Chinese item labels
-    for label_col in [3, 2]:
+    # Scan columns A-D for vertical blocks of Chinese item labels
+    # Pick the column with the MOST candidates
+    best_candidates = []
+    best_col = None
+    for label_col in [2, 3, 1, 4]:
         candidate_items = []
         for row in range(5, min(35, max_row + 1)):
             val = ws.cell(row=row, column=label_col).value
@@ -382,20 +389,46 @@ def _try_row_label_extraction(ws):
                 continue
             candidate_items.append((row, text))
 
-        if len(candidate_items) >= 2:
-            for _, label in candidate_items:
-                item_name = _clean_label(label)
-                spec_value, parsed = _extract_embedded_spec(label)
-                items.append({
-                    "item_name": item_name,
-                    "spec_value": spec_value,
-                    "parsed_spec": parsed,
-                    "group_name": None,
-                    "sub_group": None,
-                    "display_order": order,
-                })
-                order += 1
-            return items
+        if len(candidate_items) > len(best_candidates):
+            best_candidates = candidate_items
+            best_col = label_col
+
+    if len(best_candidates) >= 2 and best_col is not None:
+        # Try to find spec values in adjacent column (col+1)
+        spec_col = best_col + 1
+        for row, label in best_candidates:
+            item_name = _clean_label(label)
+            # First try embedded spec in the label itself
+            spec_value, parsed = _extract_embedded_spec(label)
+            # If no embedded spec, check adjacent column
+            if not spec_value and spec_col <= max_col:
+                adj_val = ws.cell(row=row, column=spec_col).value
+                if adj_val:
+                    adj_text = str(adj_val).strip()
+                    spec_value, parsed = _extract_embedded_spec(adj_text)
+                    if not spec_value:
+                        # Try bare range in adjacent cell
+                        range_m = _BARE_RANGE_RE.search(adj_text)
+                        if range_m:
+                            spec_value = f"{range_m.group(1)}~{range_m.group(2)}"
+                            parsed = parse_spec_string(spec_value)
+                        elif re.match(r"^[<>≤≥]=?\s*[\d.]+", adj_text):
+                            spec_value = adj_text.replace("≥", ">=").replace("≤", "<=")
+                            parsed = parse_spec_string(spec_value)
+                        elif re.search(r"[\u4e00-\u9fff]", adj_text) and len(adj_text) <= 20:
+                            # Text spec like "圆球状", "无塌陷变形"
+                            spec_value = adj_text
+                            parsed = parse_spec_string(adj_text)
+            items.append({
+                "item_name": item_name,
+                "spec_value": spec_value,
+                "parsed_spec": parsed,
+                "group_name": None,
+                "sub_group": None,
+                "display_order": order,
+            })
+            order += 1
+        return items
 
     return items
 
@@ -412,8 +445,10 @@ def _is_skip_label(label: str) -> bool:
     for partial in _SKIP_PARTIALS:
         if partial in label_clean and len(label_clean) <= len(partial) + 4:
             return True
-    # Pure numbers
+    # Pure numbers or numeric ranges/thresholds (data values, not labels)
     if re.match(r"^[\d.]+$", label_clean):
+        return True
+    if re.match(r"^[\d.]+\s*[~～\-]\s*[\d.]+[%℃°]?$", label_clean):
         return True
     # Date/time patterns (e.g., "2026/03", "03/17", "07:04", "2026年3月")
     if re.match(r"^\d{2,4}[/\-年]\d{1,2}[月]?$", label_clean):

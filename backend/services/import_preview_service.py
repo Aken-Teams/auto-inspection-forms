@@ -58,19 +58,58 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
             header_specs = extract_specs_from_headers(
                 wb, form_code, form_type.form_name
             )
+            # Determine which method succeeded and the parsed specs
+            parsed_specs = None
+            parse_method = None
+            parse_warning = None
+
             if header_specs and any(eq.get("items") for eq in header_specs):
+                parsed_specs = header_specs
+                parse_method = "header"
+                parse_warning = "此檔案無匯總 sheet，已從資料表頭自動提取檢查項目"
+            else:
+                # 3rd fallback: AI analysis of data sheet
+                from services.ai_spec_parser import ai_parse_data_sheet
+                data_sheets = [s for s in wb.sheetnames if s != "汇总"]
+                if data_sheets:
+                    ai_result = ai_parse_data_sheet(
+                        wb[data_sheets[0]], form_code, form_type.form_name
+                    )
+                    if ai_result:
+                        ai_specs = []
+                        for eq in ai_result.get("equipment_specs", []):
+                            items = []
+                            for i, item in enumerate(eq.get("items", [])):
+                                items.append({
+                                    "item_name": item.get("item_name", f"item_{i}"),
+                                    "spec_value": str(item.get("spec_value", "")),
+                                    "parsed_spec": item.get("parsed_spec", {}),
+                                    "group_name": item.get("group_name"),
+                                    "sub_group": item.get("sub_group"),
+                                    "display_order": item.get("display_order", i),
+                                })
+                            ai_specs.append({
+                                "equipment_id": eq.get("equipment_id", "UNIVERSAL"),
+                                "equipment_name": eq.get("equipment_name", "UNIVERSAL"),
+                                "items": items,
+                            })
+                        if ai_specs and any(eq.get("items") for eq in ai_specs):
+                            parsed_specs = ai_specs
+                            parse_method = "ai"
+                            result["ai_confidence"] = ai_result.get("confidence")
+                            parse_warning = "此檔案無匯總 sheet，已透過 AI 分析資料表提取檢查項目"
+
+            if parsed_specs:
                 result["structure_validation"] = {
                     "valid": True,
-                    "warnings": [
-                        "此檔案無匯總 sheet，已從資料表頭自動提取檢查項目"
-                    ],
+                    "warnings": [parse_warning],
                 }
-                result["parse_method"] = "header"
-                result["parsed_specs"] = _compute_diffs(db, form_type, header_specs)
+                result["parse_method"] = parse_method
+                result["parsed_specs"] = _compute_diffs(db, form_type, parsed_specs)
 
                 from services.spec_file_service import check_specs_identical
                 content_identical = check_specs_identical(
-                    db, form_code, header_specs
+                    db, form_code, parsed_specs
                 )
                 result["content_identical"] = content_identical
                 if content_identical:
@@ -88,7 +127,7 @@ def preview_import(db: Session, filepath: str, file_content: bytes,
                 result["structure_validation"] = {
                     "valid": False,
                     "warnings": [
-                        "此檔案無匯總 sheet，且無法從資料表頭提取檢查項目"
+                        "此檔案無匯總 sheet，規則提取與 AI 分析均無法提取檢查項目"
                     ],
                 }
                 return result

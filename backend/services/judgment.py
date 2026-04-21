@@ -1,7 +1,29 @@
 """Judgment engine: compare raw data against specs and produce OK/NG results."""
+import re
 from sqlalchemy.orm import Session
 from models import FormSpec, SpecItem, FormType
 from utils.spec_parser import judge_value
+
+
+def _normalize_label(s: str) -> str:
+    """Normalize a label for fuzzy comparison.
+
+    - Full-width parentheses → half-width
+    - Strip whitespace, newlines
+    - Lowercase
+    """
+    s = s.replace("（", "(").replace("）", ")").replace("\n", " ").strip().lower()
+    # Collapse multiple spaces
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def _strip_units(s: str) -> str:
+    """Strip trailing parenthesized units from a label.
+
+    e.g., '温度(℃)' → '温度', '合模压力(ton)' → '合模压力'
+    """
+    return re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
 
 
 def judge_sheet_data(db: Session, form_code: str, equipment_id: str, parsed_data: dict) -> dict:
@@ -272,6 +294,14 @@ def _find_matching_spec(db: Session, form_type_id: int, equipment_id: str,
             if spec:
                 return spec
 
+    # Universal fallback: try UNIVERSAL spec (used by header_spec_extractor for non-built-in types)
+    spec = db.query(FormSpec).filter(
+        FormSpec.form_type_id == form_type_id,
+        FormSpec.equipment_id == "UNIVERSAL",
+    ).first()
+    if spec:
+        return spec
+
     return None
 
 
@@ -291,14 +321,32 @@ def _find_spec_for_key(spec_lookup: dict, spec_lookup_by_subgroup: dict,
     # GenericParser col_N keys: map to header label and look up by label
     if key.startswith("col_") and col_label_map:
         label = col_label_map.get(key)
-        if label and label in spec_lookup:
+        if not label:
+            return None
+
+        # 1. Exact match
+        if label in spec_lookup:
             return spec_lookup[label]
-        # Try partial/normalized matching (strip whitespace, case-insensitive)
-        if label:
-            label_norm = label.strip().lower()
-            for item_name, item in spec_lookup.items():
-                if item_name.strip().lower() == label_norm:
-                    return item
+
+        # 2. Normalized match (parentheses, whitespace, case)
+        label_norm = _normalize_label(label)
+        for item_name, item in spec_lookup.items():
+            if _normalize_label(item_name) == label_norm:
+                return item
+
+        # 3. Match after stripping units: "温度(℃)" matches "温度"
+        label_stripped = _strip_units(label_norm)
+        for item_name, item in spec_lookup.items():
+            name_stripped = _strip_units(_normalize_label(item_name))
+            if label_stripped == name_stripped and label_stripped:
+                return item
+
+        # 4. Substring containment: spec "温度" matches header "温度(℃)"
+        for item_name, item in spec_lookup.items():
+            name_norm = _normalize_label(item_name)
+            if len(name_norm) >= 2 and (name_norm in label_norm or label_norm in name_norm):
+                return item
+
         return None
 
     # Try sub_group-based matching first for F-RD09AK

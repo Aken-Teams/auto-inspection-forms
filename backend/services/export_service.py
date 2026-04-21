@@ -160,8 +160,8 @@ def _annotate_sheet(ws, judged_data: dict):
     judgment_col = meta.get("judgment_col")
 
     if len(row_map) != len(judged_rows):
-        logger.warning(f"_annotate_sheet: row count mismatch - row_map={len(row_map)}, judged_rows={len(judged_rows)}")
-        return  # Meta/data mismatch, skip
+        logger.warning(f"_annotate_sheet: row count mismatch - row_map={len(row_map)}, judged_rows={len(judged_rows)}, annotating min overlap")
+        # Annotate as many rows as we can instead of giving up entirely
 
     # Step 1: Clear judgment column if it exists
     if judgment_col:
