@@ -54,7 +54,8 @@
     "deleteBatch": "删除此批次",
     "deleteBatchTitle": "删除上传批次",
     "deleteBatchConfirm": "确定要删除此批次吗？将删除 {{count}} 个文件及 {{sheets}} 个工作表的检验结果，此操作不可撤销。",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "deleteSuccess": "已删除"
   },
   "detail": {
     "backToList": "返回列表",

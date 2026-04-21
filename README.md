@@ -6,13 +6,17 @@
 
 - **自動辨識表單** — 6 級優先識別（檔名正則 > 關鍵字 > Sheet 名 > 內容 > 資料庫 > AI）
 - **5 種內建表單解析器** — F-QA1021、F-RD09AA、F-RD09AB、F-RD09AJ、F-RD09AK
-- **通用解析器** — 自動偵測表頭，支援任意自訂表單
+- **通用解析器** — 自動偵測表頭，零程式碼擴展新表單類型
+  - 標準行列格式（自動偵測中文表頭）
+  - 多層表頭（子標題自動合併為群組）
+  - 轉置/樞紐格式（日期橫向展開，自動轉置）
+- **表頭規格提取** — 無需「匯總」Sheet，從 data sheet 表頭自動提取檢查項目與內嵌規格
 - **多種規格判定** — 範圍 (`125~145`)、門檻值 (`≥3`)、勾選 (`√`)、文字 (`OK`)、略過 (`/`)
 - **批次上傳** — 一次上傳多個檔案，批次處理並匯總結果
 - **規格管理** — 匯入 / 編輯 / 版本追蹤 / 回溯
 - **匯出報表** — 單 Sheet / 整份上傳 / 批次 ZIP，OK 綠色 / NG 紅色標註
 - **AI 輔助** — DeepSeek API 進行表單辨識與規格提取（可選）
-- **多語系** — i18next 國際化支援
+- **多語系** — 繁中、簡中、英文
 
 ## 技術架構
 
@@ -35,7 +39,7 @@ auto-inspection-forms/
 │   ├── parsers/                # 表單解析器
 │   │   ├── base.py             # 解析器基底類別
 │   │   ├── identifier.py       # 表單類型辨識引擎
-│   │   ├── generic_parser.py   # 通用解析器（任意表單）
+│   │   ├── generic_parser.py   # 通用解析器（標準/多層表頭/轉置格式）
 │   │   ├── qa1021_parser.py    # F-QA1021 離子消散設備
 │   │   ├── rd09aa_parser.py    # F-RD09AA Auto Mold 機台
 │   │   ├── rd09ab_parser.py    # F-RD09AB Auto Mold 洗模
@@ -47,9 +51,10 @@ auto-inspection-forms/
 │   │   ├── specs.py            # 規格管理 CRUD
 │   │   └── download.py         # 匯出下載
 │   ├── services/               # 業務邏輯
-│   │   ├── judgment.py         # 判定引擎
+│   │   ├── judgment.py         # 判定引擎（四層模糊匹配）
 │   │   ├── spec_service.py     # 規格匯入與管理
-│   │   ├── export_service.py   # Excel 匯出
+│   │   ├── export_service.py   # Excel 匯出（合併儲存格處理）
+│   │   ├── header_spec_extractor.py  # 表頭規格自動提取
 │   │   ├── ai_service.py       # DeepSeek API 整合
 │   │   ├── ai_spec_parser.py   # AI 規格提取
 │   │   ├── spec_version_service.py    # 版本追蹤
@@ -93,6 +98,44 @@ UploadRecord ──< InspectionResult >── FormSpec
 | `UploadRecord` | 上傳紀錄（檔名、狀態、批次 ID） |
 | `InspectionResult` | 檢驗結果（原始數據、判定數據、整體結果） |
 | `SpecVersion` | 規格版本快照（變更摘要、回溯支援） |
+
+## 支援的表單類型
+
+### 內建解析器（5 種）
+
+| 代碼 | 名稱 | 設備模式 |
+|------|------|----------|
+| F-QA1021 | 離子消散設備點檢記錄表 | `RD-LZ-*` |
+| F-RD09AA | Auto Mold 機台檢查記錄表 | `WP*-*` |
+| F-RD09AB | Auto Mold 洗模檢查記錄表 | `WP*-*` |
+| F-RD09AJ | RO 焊接爐檢查記錄表 | `WCBA-*` |
+| F-RD09AK | SMD (Clip) 切彎腳尺寸檢查記錄表 | `WTFB-*` |
+
+### 通用解析器（GenericParser）
+
+以下表單類型透過通用解析器 + 表頭規格提取，無需撰寫專用程式碼即可支援：
+
+| 代碼 | 名稱 | 格式 |
+|------|------|------|
+| F-RD0976 | S焊清洗液添排液檢查記錄表 | 標準行列 |
+| F-RD09AC | Clip Bond 檢查記錄表 | 標準行列（含內嵌規格） |
+| F-RD09AL | SMD 切彎腳外觀抽驗記錄表 | 多層表頭 |
+| F-RD09AN | TMTT 印字影像準確度檢查記錄表 | 標準行列 |
+| F-RD09AY | SMD AU 首件檢查記錄表 | 標準行列 |
+| F-RD09B10 | 純水電阻率檢查記錄表 | 標準行列 |
+| F-RD09BU | Clip Bond 外觀檢查記錄表 | 多層表頭 |
+| F-RD09BW | TMTT站 Vision 開機首件檢查記錄表 | 標準行列 |
+| F-RD09CS | Clip Bond 出爐外觀檢查表 | 標準行列 |
+| F-RD09EA | 新弘田清洗機檢查記錄表 | 標準行列（含內嵌規格） |
+| F-RD09F1 | 溫度/濕度檢查記錄表 | 轉置格式 |
+| F-RD09FZ | SMD-C AU TMTT站外觀檢查記錄表 | 標準行列 |
+| F-RD09GA | SMD-C AU TMTT站開機首件檢查記錄表 | 多層表頭（含判定欄） |
+| F-RD09GB | SMD-C AU TMTT 封合拉力測試記錄表 | 多層表頭（含判定欄） |
+| F-RD09Q1 | 錫膏放置冰箱溫度檢查記錄表 | 轉置格式 |
+| F-RD09X7 | 機台調整後復機點檢表 | 標準行列 |
+| F-RD1024 | SMD AU Line 外觀檢查記錄表 | 轉置格式 |
+| F-RD2123 | 防潮櫃檢查記錄表 | 轉置格式 |
+| F-RD2140 | 烤箱作業記錄表 | 標準行列 |
 
 ## 快速開始
 
@@ -188,17 +231,14 @@ pnpm dev:frontend   # 前端 http://localhost:5173
 | `GET` | `/api/download/upload/{id}` | 下載整份上傳結果 (Excel) |
 | `POST` | `/api/download/batch` | 批次下載 (ZIP) |
 
-## 內建表單類型
-
-| 代碼 | 名稱 | 設備模式 |
-|------|------|----------|
-| F-QA1021 | 離子消散設備點檢記錄表 | `RD-LZ-*` |
-| F-RD09AA | Auto Mold 機台檢查記錄表 | `WP*-*` |
-| F-RD09AB | Auto Mold 洗模檢查記錄表 | `WP*-*` |
-| F-RD09AJ | RO 焊接爐檢查記錄表 | `WCBA-*` |
-| F-RD09AK | SMD (Clip) 切彎腳尺寸檢查記錄表 | `WTFB-*` |
-
 ## 使用流程
+
+### 新增表單類型（零程式碼）
+
+1. 進入「規格管理」頁面，新增表單類型
+2. 上傳該表單的 Excel 檔案作為規格來源
+3. 系統自動從表頭提取檢查項目（有內嵌規格自動解析，無規格的項目可手動補充）
+4. 即可開始上傳點檢資料進行判定
 
 ### 上傳點檢表
 
@@ -210,7 +250,7 @@ pnpm dev:frontend   # 前端 http://localhost:5173
 ### 管理規格
 
 1. 進入「規格管理」頁面
-2. 選擇表單類型，上傳含「匯總」Sheet 的規格 Excel
+2. 選擇表單類型，上傳規格 Excel（支援有/無「匯總」Sheet）
 3. 預覽變更差異，確認匯入
 4. 規格即刻生效，歷史版本可追蹤與回溯
 

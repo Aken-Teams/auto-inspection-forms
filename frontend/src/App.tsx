@@ -76,7 +76,14 @@ function App() {
 
         {/* Footer */}
         <footer className="border-t border-sand/40 py-5 text-center text-warm-gray text-xs tracking-wider">
-          <p className="m-0">{t('common.footer')}</p>
+          <p className="m-0">
+            Powered by{' '}
+            <a href="https://www.zh-aoi.com/" target="_blank" rel="noopener noreferrer"
+               className="text-terracotta hover:text-charcoal transition-colors">
+              智合科技
+            </a>
+            {' '}© 2026
+          </p>
         </footer>
       </div>
     </Router>

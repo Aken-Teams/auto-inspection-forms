@@ -69,13 +69,27 @@ export default function Results() {
 
   const handleDeleteBatch = async () => {
     if (!deletingBatch) return;
+    const batchId = deletingBatch.batch_id;
+    setDeletingBatch(null);
+
+    // Optimistic update: remove from UI immediately
+    setBatches(prev => prev.filter(b => b.batch_id !== batchId));
+    setTotal(prev => prev - 1);
+
     try {
-      await deleteBatch(deletingBatch.batch_id);
-      setDeletingBatch(null);
-      loadBatches();
+      await deleteBatch(batchId);
+      toast(t('history.deleteSuccess'), 'success');
+
+      // If current page is now empty and not page 1, go back one page
+      if (batches.length <= 1 && page > 1) {
+        setPage(page - 1);  // triggers reload via useEffect
+      } else {
+        loadBatches();  // refresh to get accurate counts
+      }
     } catch (err) {
       console.error(err);
       toast(t('history.deleteFailed'), 'error');
+      loadBatches();  // revert on failure
     }
   };
 
@@ -99,10 +113,10 @@ export default function Results() {
     </svg>
   );
 
-  const batchBorderStyle = (ok: number, ng: number, noSpec: number) => {
-    if (ng > 0) return 'border-rust/30 bg-rust/5';
-    if (ok > 0 && noSpec === 0) return 'border-forest/30 bg-forest/5';
-    return 'border-sand/40 bg-white';
+  const batchBorderStyle = (ok: number, ng: number) => {
+    if (ng > 0) return 'border-l-4 border-l-rust border-sand/30 bg-white';
+    if (ok > 0) return 'border-l-4 border-l-forest border-sand/30 bg-white';
+    return 'border-l-4 border-l-sand border-sand/30 bg-white';
   };
 
   return (
@@ -126,7 +140,7 @@ export default function Results() {
             const isExpanded = expandedBatch === batch.batch_id;
             return (
               <div key={batch.batch_id}
-                className={`border rounded-lg overflow-hidden transition-all ${batchBorderStyle(batch.ok_count, batch.ng_count, batch.no_spec_count)}`}>
+                className={`rounded-lg overflow-hidden transition-all ${batchBorderStyle(batch.ok_count, batch.ng_count)}`}>
                 {/* Batch Header */}
                 <div
                   onClick={() => toggleExpand(batch.batch_id)}

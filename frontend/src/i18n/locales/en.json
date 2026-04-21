@@ -54,7 +54,8 @@
     "deleteBatch": "Delete batch",
     "deleteBatchTitle": "Delete Upload Batch",
     "deleteBatchConfirm": "Are you sure you want to delete this batch? This will remove {{count}} files and {{sheets}} sheets of inspection results. This cannot be undone.",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "deleteSuccess": "Deleted"
   },
   "detail": {
     "backToList": "Back to list",
