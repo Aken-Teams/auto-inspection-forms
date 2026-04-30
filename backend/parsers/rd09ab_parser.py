@@ -110,6 +110,10 @@ class RD09ABParser(BaseParser):
         rows = []
         meta_rows = []
         row = data_start
+        # Carry-forward for merged cells: wash_reason/method span multiple rows visually
+        # but openpyxl only returns the value in the top-left cell of the merged range.
+        current_wash_reason = None
+        current_wash_method = None
 
         while row <= ws.max_row:
             # Check for end
@@ -132,9 +136,18 @@ class RD09ABParser(BaseParser):
                 # Basic info (might be from a previous merged row)
                 values["date"] = str(self._cell_val(ws, row, date_col) or "")
                 values["time"] = str(self._cell_val(ws, row, time_col) or "")
-                values["wash_reason"] = self._cell_val(ws, row, reason_col)
+
+                # Carry-forward: merged cells return None for non-top-left cells.
+                # When cell is None, keep the last known value from this session.
+                cell_reason = self._cell_val(ws, row, reason_col)
+                cell_method = self._cell_val(ws, row, method_col)
+                if cell_reason is not None:
+                    current_wash_reason = cell_reason
+                if cell_method is not None:
+                    current_wash_method = cell_method
+                values["wash_reason"] = current_wash_reason
                 cells["wash_reason"] = [row, reason_col]
-                values["wash_method"] = self._cell_val(ws, row, method_col)
+                values["wash_method"] = current_wash_method
                 cells["wash_method"] = [row, method_col]
                 values["mold_count"] = self._cell_val(ws, row, mold_count_col)
                 cells["mold_count"] = [row, mold_count_col]

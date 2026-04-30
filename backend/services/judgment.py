@@ -185,10 +185,28 @@ def _judge_rd09ab(db: Session, form_type_id: int, equipment_id: str,
     has_ng = False
     first_spec_id = all_specs[0].id
 
+    # Carry-forward for already-uploaded files whose raw_data still has None
+    # wash_reason/wash_method (merged cells in the original Excel).
+    prev_wash_reason = ""
+    prev_wash_method = ""
+
     for row_data in parsed_data.get("rows", []):
         values = row_data.get("values", {})
-        wash_reason = values.get("wash_reason", "")
-        wash_method = values.get("wash_method", "")
+        wash_reason = values.get("wash_reason") or ""
+        wash_method = values.get("wash_method") or ""
+
+        # Carry-forward: if this row's cell was a merged cell (reads as None/blank),
+        # reuse the last seen value so we stay in the same wash session spec.
+        if not wash_reason:
+            wash_reason = prev_wash_reason
+        if not wash_method:
+            wash_method = prev_wash_method
+
+        # Update carry-forward state when we see a new non-empty value
+        if values.get("wash_reason"):
+            prev_wash_reason = str(values["wash_reason"])
+        if values.get("wash_method"):
+            prev_wash_method = str(values["wash_method"])
 
         # Build spec key for this row
         spec_key = f"{equipment_id}_{wash_reason}_{wash_method}"
@@ -201,10 +219,8 @@ def _judge_rd09ab(db: Session, form_type_id: int, equipment_id: str,
                     row_spec = cached
                     break
 
-        # Fallback 2: use any spec for this machine
-        # Covers rows where wash_reason/wash_method are blank (merged cells read as None)
-        # or have values not in the spec file. Temperature specs are the same per machine
-        # regardless of wash type.
+        # Fallback 2: use any spec for this machine (last resort only —
+        # should rarely trigger now that carry-forward is in place)
         if not row_spec:
             row_spec = next(iter(spec_cache.values()), None)
 
