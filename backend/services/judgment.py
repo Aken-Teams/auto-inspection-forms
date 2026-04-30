@@ -194,12 +194,19 @@ def _judge_rd09ab(db: Session, form_type_id: int, equipment_id: str,
         spec_key = f"{equipment_id}_{wash_reason}_{wash_method}"
         row_spec = spec_cache.get(spec_key)
 
-        # Fallback: try without wash_method, or just machine_id
+        # Fallback 1: try without wash_method
         if not row_spec and wash_reason:
             for key, cached in spec_cache.items():
                 if key.startswith(f"{equipment_id}_{wash_reason}"):
                     row_spec = cached
                     break
+
+        # Fallback 2: use any spec for this machine
+        # Covers rows where wash_reason/wash_method are blank (merged cells read as None)
+        # or have values not in the spec file. Temperature specs are the same per machine
+        # regardless of wash type.
+        if not row_spec:
+            row_spec = next(iter(spec_cache.values()), None)
 
         judged_values = {}
         for key, raw_value in values.items():
