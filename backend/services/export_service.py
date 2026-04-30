@@ -185,6 +185,12 @@ def _annotate_sheet(ws, judged_data: dict):
                         f"judged_rows={len(judged_rows)}, annotating min overlap")
 
     # Step 1: Apply NG color fills FIRST (before any column inserts, so positions are correct)
+    # For each cell with a spec judgment:
+    #   - NG  → apply red fill + red bold font
+    #   - OK  → clear any previous annotation fill and reset red font
+    #   - SKIP → leave original formatting untouched
+    # This makes re-export idempotent (uploading an already-annotated file won't
+    # accumulate stale red fills from previous export runs).
     if has_spec:
         for i, jr in enumerate(judged_rows):
             if i >= len(row_map):
@@ -193,16 +199,31 @@ def _annotate_sheet(ws, judged_data: dict):
             for key, val_data in jr.get("values", {}).items():
                 if not isinstance(val_data, dict):
                     continue
-                if val_data.get("judgment") != "NG":
-                    continue
+                judgment = val_data.get("judgment")
+                if judgment == "SKIP":
+                    continue  # No spec matched — leave original cell formatting
                 cell_pos = cells_map.get(key)
                 if not cell_pos:
                     continue
                 excel_row, excel_col = cell_pos
                 try:
                     cell = ws.cell(row=excel_row, column=excel_col)
-                    cell.fill = FILL_NG
-                    cell.font = FONT_NG
+                    if judgment == "NG":
+                        cell.fill = FILL_NG
+                        cell.font = FONT_NG
+                    else:  # OK — clear previous annotation
+                        cell.fill = PatternFill()  # remove red background
+                        # Reset font color to black if it was set red by a previous export
+                        try:
+                            rgb = str(cell.font.color.rgb).upper()
+                            if "FF0000" in rgb:
+                                f = cell.font
+                                cell.font = Font(
+                                    name=f.name, size=f.size,
+                                    bold=f.bold, italic=f.italic,
+                                )  # no color arg → defaults to black
+                        except Exception:
+                            pass
                 except AttributeError:
                     pass  # Merged cell
 
